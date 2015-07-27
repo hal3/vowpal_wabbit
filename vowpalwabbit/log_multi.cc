@@ -81,8 +81,12 @@ using namespace LEARNER;
     uint32_t swap_resist;
 
     uint32_t nbofswaps;
+
+    size_t overflow_size; // when < this number of labels remain, just predict with one-vs-some; zero means no one-vs-some
+    bool cheat;
+    vw* all;
   };	
-  
+
   inline void init_leaf(node& n)
   {
     n.internal = false;
@@ -290,6 +294,66 @@ using namespace LEARNER;
       return n.right;
   }
 
+  uint32_t predict_one_vs_some(log_multi& b, base_learner& base, example& ec, v_array<uint32_t>& label_set, uint32_t cheat_y=0) {
+    // assume old label has already been stored and will be restored elsewhere
+    ec.l.simple = { FLT_MAX, 0.f, 0.f };
+    uint32_t best_lab = 0;
+    float best_score = -FLT_MAX;
+    if (! b.cheat) cheat_y = 0;
+    for (uint32_t* lab = label_set.begin; lab != label_set.end; ++lab) {
+      if (cheat_y == *lab) return cheat_y;
+      base.predict(ec, b.max_predictors + *lab);
+      if ((best_lab == 0) || (ec.partial_prediction > best_score)) {
+        best_lab = *lab;
+        best_score = ec.partial_prediction;
+      }
+    }
+    ec.partial_prediction = best_score;
+    return best_lab;
+  }
+
+  void train_one_vs_some(log_multi& b, base_learner& base, example& ec, uint32_t label, bool is_correct) {
+    // assume old label has already been stored and will be restored elsewhere
+    ec.l.simple.label = is_correct ? 1.f : -1.f;
+    ec.l.simple.weight = 1.f;
+    ec.l.simple.initial = 0.f;
+    base.learn(ec, b.max_predictors + label);
+  }
+
+  bool small_confusion_set(log_multi& b, uint32_t& current, v_array<uint32_t>& label_set) { // returns true iff at most overflow_size labels remain, in which case it fills in the label set with those
+    // strict version
+    if (b.nodes[current].preds.size() >= b.overflow_size)
+      return false;
+    label_set.erase();
+    for (node_pred* np = b.nodes[current].preds.begin; np != b.nodes[current].preds.end; ++np)
+      label_set.push_back(np->label);
+    return true;
+
+    // lenient version
+    float total_label_count = 0.f;
+    for (node_pred* np = b.nodes[current].preds.begin; np != b.nodes[current].preds.end; ++np)
+      total_label_count += (float) np->label_count;
+    label_set.erase();
+    for (node_pred* np = b.nodes[current].preds.begin; np != b.nodes[current].preds.end; ++np)
+      if ((float)np->label_count >= total_label_count * 0.001) {
+        label_set.push_back(np->label);
+        if (label_set.size() >= b.overflow_size)
+          return false;
+      }
+    return true;
+  }
+
+  bool accessible(log_multi& b, uint32_t current, uint32_t label) {
+    if (! b.nodes[current].internal) // leaf
+      return b.nodes[current].max_count_label == label;
+
+    // internal
+    if (accessible(b, b.nodes[current].left, label) || accessible(b, b.nodes[current].right, label))
+      return true;
+
+    return false;
+  }
+
   void predict(log_multi& b,  base_learner& base, example& ec)	
   {
     MULTICLASS::label_t mc = ec.l.multi;
@@ -297,33 +361,61 @@ using namespace LEARNER;
     ec.l.simple = {FLT_MAX, 0.f, 0.f};
     uint32_t cn = 0;
     uint32_t depth = 0;
+    bool failed_already = false;
+    v_array<uint32_t> label_set = v_init<uint32_t>();
     while(b.nodes[cn].internal)
       {
+        if ((b.all->current_pass == b.all->numpasses-1) && ec.test_only && !failed_already) {
+          if (! accessible(b, cn, mc.label)) {
+            cout << ec.example_counter << "\tfail\t" << depth << endl;
+            failed_already = true;
+          }
+        }
+        if (small_confusion_set(b, cn, label_set)) {
+          ec.pred.multiclass = predict_one_vs_some(b, base, ec, label_set, mc.label);
+          ec.l.multi = mc;
+          label_set.delete_v();
+          return;
+        }
 	base.predict(ec, b.nodes[cn].base_predictor); // depth
 	cn = descend(b.nodes[cn], ec.pred.scalar);
         depth ++;
       }	
     ec.pred.multiclass = b.nodes[cn].max_count_label;
     ec.l.multi = mc;
+    label_set.delete_v();
+    if ((b.all->current_pass == b.all->numpasses-1) && ec.test_only && !failed_already) {
+      if (ec.pred.multiclass == mc.label)
+        cout << ec.example_counter << "\tsuccess\t" << depth << endl;
+      else
+        cout << ec.example_counter << "\tfail-L\t" << depth << endl;
+    }
   }
 
   void learn(log_multi& b, base_learner& base, example& ec)
   {
     //    verify_min_dfs(b, b.nodes[0]);
-    if (ec.l.multi.label == (uint32_t)-1 || b.progress)
+    if (ec.l.multi.label == (uint32_t)-1 || b.progress || b.all->current_pass == b.all->numpasses-1)
       predict(b,base,ec);
     
     if(ec.l.multi.label != (uint32_t)-1)	//if training the tree
       {
 	MULTICLASS::label_t mc = ec.l.multi;
 	uint32_t start_pred = ec.pred.multiclass;
+        bool trained_one_vs_some = false;
+        v_array<uint32_t> label_set = v_init<uint32_t>();
 
 	uint32_t class_index = 0;	
 	ec.l.simple = {FLT_MAX, mc.weight, 0.f};
 	uint32_t cn = 0;
         uint32_t depth = 0;
 	while(children(b, cn, class_index, mc.label))
-	  {	    
+	  {
+            if ((! trained_one_vs_some) && small_confusion_set(b, cn, label_set)) {
+              trained_one_vs_some = true;
+              for (uint32_t* lab = label_set.begin; lab != label_set.end; ++lab)
+                train_one_vs_some(b, base, ec, *lab, mc.label == *lab);
+            }
 	    train_node(b, base, ec, cn, class_index, depth);
 	    cn = descend(b.nodes[cn], ec.pred.scalar);
             depth++;
@@ -333,9 +425,10 @@ using namespace LEARNER;
 	update_min_count(b, cn);	
 	ec.pred.multiclass = start_pred;
 	ec.l.multi = mc;
+        label_set.delete_v();
       }
   }
-  
+
   void save_node_stats(log_multi& d)
   {
     FILE *fp;
@@ -381,9 +474,10 @@ using namespace LEARNER;
     fclose(fp);
   }	
   
-  void finish(log_multi&)
+  void finish(log_multi&b)
   {
-    //save_node_stats(b);
+    save_node_stats(b);
+    display_tree_dfs(b, b.nodes[0], 0);
   }
   
   void save_load_tree(log_multi& b, io_buf& model_file, bool read, bool text)
@@ -489,14 +583,19 @@ base_learner* log_multi_setup(vw& all)	//learner setup
     return nullptr;
   new_options(all, "Logarithmic Time Multiclass options")
     ("no_progress", "disable progressive validation")
-    ("swap_resistance", po::value<uint32_t>(), "higher = more resistance to swap, default=4");
+    ("swap_resistance", po::value<uint32_t>(), "higher = more resistance to swap, default=4")
+    ("no_cheating", "turn off cheating")
+    ("overflow_size", po::value<uint32_t>()->default_value(0), "prune prediction when < this many labels survive, def=0 (==> don't do this); suggestion: log k");
   add_options(all);
   
   po::variables_map& vm = all.vm;
   
   log_multi& data = calloc_or_die<log_multi>();
   data.k = (uint32_t)vm["log_multi"].as<size_t>();
+  data.overflow_size = vm["overflow_size"].as<uint32_t>();
   data.swap_resist = 4;
+  data.cheat = true;
+  if (vm.count("no_cheating")) data.cheat = false;
   
   if (vm.count("swap_resistance"))
     data.swap_resist = vm["swap_resistance"].as<uint32_t>();
@@ -505,6 +604,8 @@ base_learner* log_multi_setup(vw& all)	//learner setup
     data.progress = false;
   else
     data.progress = true;
+
+  data.all = &all;
   
   string loss_function = "quantile"; 
   float loss_parameter = 0.5;
@@ -513,8 +614,10 @@ base_learner* log_multi_setup(vw& all)	//learner setup
   
   data.max_predictors = data.k - 1;
   init_tree(data);	
-  
-  learner<log_multi>& l = init_multiclass_learner(&data, setup_base(all), learn, predict, all.p, data.max_predictors);
+
+  uint32_t num_predictors = data.max_predictors;
+  if (data.overflow_size > 0) num_predictors += data.k+1;
+  learner<log_multi>& l = init_multiclass_learner(&data, setup_base(all), learn, predict, all.p, num_predictors);
   l.set_save_load(save_load_tree);
   l.set_finish(finish);
     
