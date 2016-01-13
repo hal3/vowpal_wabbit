@@ -18,14 +18,17 @@ using namespace LEARNER;
 namespace oas {
 
 template<class T> struct pqueue {
+  public:
   v_array<v_array<pair<T,float>>> A;
   uint32_t level;
   uint32_t index; // we're looking at A[level][index]
+  float live_mass;
 
   void insert(T data, float cost) {
     uint32_t l = (uint32_t)floor(cost);
     if (l >= A.size()) l = A.size()-1;
     A[l].push_back( make_pair(data,cost) );
+    live_mass += exp(-cost);
   }
 
   pair<T,float>* next() {
@@ -36,6 +39,7 @@ template<class T> struct pqueue {
       index=0;
       return next();
     }
+    live_mass -= exp(-A[level][index].second);
     return &A[level][index++];
   }
 
@@ -44,6 +48,7 @@ template<class T> struct pqueue {
       A[l].erase();
     index = 0;
     level = 0;
+    live_mass = 0.;
   }
 
   pqueue(uint32_t max_levels) {
@@ -51,6 +56,7 @@ template<class T> struct pqueue {
       A.push_back( v_init<pair<T,float>>() );
     level = 0;
     index = 0;
+    live_mass = 0.;
   }
 };
   
@@ -131,7 +137,8 @@ struct oas
   float log_MaxMassToConsider;
   uint32_t MaxDequeues;
   bool predict_by_sum;
-
+  bool dequeue_leaves;
+  
   uint32_t nbofswaps;
 
   OASTrainMethod train_method;
@@ -349,17 +356,6 @@ void predict_noucs(oas& b,  base_learner& base, example& ec)
   ec.l.multi = mc;
 }
 
-float addLog(float a, float b) {
-  if (isinf(a) == -1) return b;
-  if (isinf(b) == -1) return a;
-  if (isinf(a) ==  1) return a;
-  if (isinf(b) ==  1) return b;
-  if (a - b > 16) return a;
-  if (a > b) return a + log(1 + exp(b-a));
-  if (b - a > 16) return b;
-  return b + log(1 + exp(a-b));
-}
-
 struct weighted_node {
   uint32_t node;
   float weight;
@@ -372,7 +368,7 @@ void predict_ucs(oas& b, base_learner& base, example& ec, v_array<weighted_node>
   MULTICLASS::label_t mc = ec.l.multi;
   ec.l.simple = {FLT_MAX, 0.f, 0.f};
 
-  float total_mass = -100;
+  float total_mass = 0.;
  
   uint32_t pred = 1;
   float predScore = -FLT_MAX;
@@ -388,7 +384,7 @@ void predict_ucs(oas& b, base_learner& base, example& ec, v_array<weighted_node>
   while ((elem = b.Q.next()) != nullptr) {
     treenode& node = elem->first;
     float elem_cost = elem->second;
-    // cerr << "popped is_class=" << node.is_class << " value=" << node.value << " cost=" << elem_cost << endl;
+    //cerr << "popped is_class=" << node.is_class << " value=" << node.value << " cost=" << elem_cost << endl;
     if (node.is_class) {
       if (b.class_scores[node.value-1] <= 0.) { // if we haven't seen this label yet, we have to do work        
         b.labelset.push_back(node.value);
@@ -413,9 +409,9 @@ void predict_ucs(oas& b, base_learner& base, example& ec, v_array<weighted_node>
       b.num_classes_popped++;
       b.class_mass += exp(-elem_cost);
       
-      total_mass = addLog(total_mass, -elem_cost);
+      total_mass += exp(-elem_cost);
       num_labels_considered ++;
-      if (total_mass >= b.log_MaxMassToConsider || num_labels_considered >= b.MaxDequeues)
+      if (log(total_mass) >= b.log_MaxMassToConsider || num_labels_considered >= b.MaxDequeues)
         break;
     } else { // node is an internal node
       uint32_t cn = node.value;
@@ -430,13 +426,13 @@ void predict_ucs(oas& b, base_learner& base, example& ec, v_array<weighted_node>
 
         if (1. - pR > 0.) {
           treenode nodeL = { b.nodes[cn].left, false };
-          // cerr << "push L is_class=0 value=" << b.nodes[cn].left << " cost=" << elem_cost - log(1.-pR) << endl;
+          //cerr << "push L is_class=0 value=" << b.nodes[cn].left << " cost=" << elem_cost - log(1.-pR) << endl;
           b.Q.insert(nodeL, elem_cost - log(1.-pR));
         }
 
         if (pR > 0.) {
           treenode nodeR = {b.nodes[cn].right, false };
-          // cerr << "push R is_class=0 value=" << b.nodes[cn].right << " cost=" << elem_cost - log(pR) << endl;
+          //cerr << "push R is_class=0 value=" << b.nodes[cn].right << " cost=" << elem_cost - log(pR) << endl;
           b.Q.insert(nodeR, elem_cost - log(pR));
         }
       } else { // leaf!
@@ -444,25 +440,41 @@ void predict_ucs(oas& b, base_learner& base, example& ec, v_array<weighted_node>
         for (node_pred*node=b.nodes[cn].preds.begin; node != b.nodes[cn].preds.end; ++node)
           if (node->label_count > 0)
             sum_count += node->label_count;
-        if (sum_count > 0) {
+        if (sum_count == 0) {
+          b.class_scores[0] += exp(-elem_cost);
+          b.labelset.push_back(1);
+          total_mass += exp(-elem_cost);
+        } else if (sum_count > 0) {
           double log_sum_count = log(sum_count);
           for (node_pred*node=b.nodes[cn].preds.begin; node != b.nodes[cn].preds.end; ++node)
             if (node->label_count > 0) {
               if (b.class_scores[node->label - 1] > 0.) { // we've already seen this, just add to scores rather than reusing the queue
-                b.class_scores[node->label - 1] += node->label_count / sum_count;
-                total_mass = addLog(total_mass, log(node->label_count / sum_count));
+                b.class_scores[node->label - 1] += exp(-elem_cost) * node->label_count / sum_count;
+                total_mass += exp(-elem_cost) * node->label_count / sum_count;
                 // TODO: udpate mass
               } else {
-                treenode nodeL = { node->label, true };
-                double logp = log(node->label_count) - log_sum_count;
-                //cerr << "push C is_class=1 sum_count=" << exp(log_sum_count) << " label_count=" << node->label_count << " value=" << node->label << " cost=" << elem_cost - logp << endl;
-                b.Q.insert(nodeL, elem_cost - logp);
+                if (b.dequeue_leaves) {
+                  b.labelset.push_back(node->label);
+                  base.predict(ec, b.k + node->label-1);
+                  if (ec.partial_prediction > predScore) {
+                    predScore = ec.partial_prediction;
+                    pred = node->label;
+                  }
+                } else {
+                  treenode nodeL = { node->label, true };
+                  double logp = log(node->label_count) - log_sum_count;
+                  //cerr << "push C is_class=1 sum_count=" << exp(log_sum_count) << " label_count=" << node->label_count << " value=" << node->label << " cost=" << elem_cost - logp << endl;
+                  b.Q.insert(nodeL, elem_cost - logp);
+                }
               }
             }
         }
       }
     }
+    assert(fabs(total_mass + b.Q.live_mass - 1.) < 1e-5);
   }
+  //cerr << "total_mass " << (total_mass) << endl;
+  assert(fabs(total_mass - 1.) < 1e-5);
   
   if (b.predict_by_sum) { // TODO use labelset to make this faster
     pred = 1;
@@ -474,7 +486,7 @@ void predict_ucs(oas& b, base_learner& base, example& ec, v_array<weighted_node>
   for (uint32_t* i=b.labelset.begin; i!=b.labelset.end; ++i)
     b.class_scores[*i - 1] = 0.;
 
-  // cerr << "truth=" << mc.label << " returning " << ec.pred.multiclass << endl << endl;
+  //cerr << "truth=" << mc.label << " returning " << ec.pred.multiclass << endl << endl;
 
   /*
   if ((uint32_t)log(b.num_classes_popped) > (uint32_t)log(num_classes_popped_old))
@@ -701,6 +713,7 @@ base_learner* oas_setup(vw& all)	//learner setup
       ("max_mass", po::value<float>(), "stop popping once we've hit this amount of probability mass, default=0.999")
       ("max_dequeues", po::value<uint32_t>(), "stop popping once we've poped this many labels, default=tree_size")
       ("predict_by_sum", "predict using tree sum probability (rather than oas)")
+      ("dequeue_leaves", "dequeue leaves rather than classes")
       ("train_single_path", "only train on the predicted path");
   add_options(all);
 
@@ -732,6 +745,7 @@ base_learner* oas_setup(vw& all)	//learner setup
   
   data.evaluate_recall = vm.count("evaluate_recall") > 0;
   data.predict_by_sum = vm.count("predict_by_sum") > 0;
+  data.dequeue_leaves = vm.count("dequeue_leaves") > 0;
 
   // switch to logistic loss and link
   all.args.push_back("--loss_function"); all.args.push_back("logistic");
