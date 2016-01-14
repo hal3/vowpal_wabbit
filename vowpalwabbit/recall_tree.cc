@@ -58,6 +58,7 @@ typedef struct
   uint32_t n;//total events at the node
   double sum_pred;
   uint32_t sum_pred_n;
+  float median;
 
 } node;
 
@@ -73,16 +74,6 @@ struct recall_tree
   size_t max_candidates;
 };
 
-inline void init_leaf(node& n)
-{ n.internal = false;
-  n.base_router = 0;
-  n.left = 0;
-  n.right = 0;
-  n.n = 0;
-  n.sum_pred = 0.;
-  n.sum_pred_n = 0;
-}
-
 inline node init_node()
 { node node;
 
@@ -90,7 +81,14 @@ inline node init_node()
   node.depth = 0;
   node.labelstats = v_init<node_label_stats>();
   node.recall_lbest = 0;
-  init_leaf(node);
+  node.internal = false;
+  node.base_router = 0;
+  node.left = 0;
+  node.right = 0;
+  node.n = 0;
+  node.sum_pred = 0.;
+  node.sum_pred_n = 0;
+  node.median = 0;
 
   return node;
 }
@@ -129,16 +127,16 @@ void init_tree(recall_tree& b)
 
 inline uint32_t descend(node& n, float prediction)
 { 
-  float avg_pred = n.sum_pred / std::max (n.sum_pred_n, 1U);
+//  float avg_pred = n.sum_pred / std::max (n.sum_pred_n, 1U);
 
 //  std::cerr << " node = " << &n 
 //            << " prediction = " << prediction << " avg_pred =  " << avg_pred 
 //            << " sum_pred = " << n.sum_pred << " n.n = " << n.n << std::endl;
 
-  if (prediction < avg_pred)
-    return n.left;
+  if (prediction < n.median)
+    return n.median-=0.01, n.left;
   else
-    return n.right;
+    return n.median+=0.01, n.right;
 }
 
 uint32_t predict_from(recall_tree& b,  base_learner& base, example& ec, uint32_t cn, uint32_t depth)
@@ -148,7 +146,8 @@ uint32_t predict_from(recall_tree& b,  base_learner& base, example& ec, uint32_t
   ec.l.simple = {FLT_MAX, 0.f, 0.f};
   while(b.nodes[cn].internal)
   { base.predict(ec, b.nodes[cn].base_router); // depth
-    uint32_t newcn = descend(b.nodes[cn], ec.pred.scalar);
+    uint32_t newcn = descend(b.nodes[cn], ec.partial_prediction);
+//    if (cn == 0) std::cerr << ec.partial_prediction << std::endl;
 //    if (! (b.nodes[cn].recall_lbest >= b.nodes[newcn].recall_lbest))
 //    if (depth == 0)
 //    std::cerr << " depth = " << depth 
@@ -221,11 +220,13 @@ void predict(recall_tree& b,  base_learner& base, example& ec)
   ec.pred.multiclass = candidate_from (b, base, ec, 0, 0, &leaf) > 0.f ? 1 + ec.l.multi.label : ec.l.multi.label;
   ec.num_features = b.nodes[leaf].depth;
 
-  assert (b.nodes[b.nodes[0].left].n + b.nodes[b.nodes[0].right].n == b.nodes[0].n ||
-          (std::cerr << b.nodes[b.nodes[0].left].n << " + " << b.nodes[b.nodes[0].right].n << " != " << b.nodes[0].n << std::endl, 0));
-
+//  assert (b.nodes[b.nodes[0].left].n + b.nodes[b.nodes[0].right].n == b.nodes[0].n ||
+//          (std::cerr << b.nodes[b.nodes[0].left].n << " + " << b.nodes[b.nodes[0].right].n << " != " << b.nodes[0].n << std::endl, 0));
+//
 //  assert (b.nodes[0].n < 1000 || std::abs ((double)b.nodes[b.nodes[0].left].n - (double)b.nodes[b.nodes[0].right].n) <= 0.4 * b.nodes[0].n ||
-//          (std::cerr << std::abs ((double)b.nodes[b.nodes[0].left].n - (double)b.nodes[b.nodes[0].right].n) << " <= " << 0.4 * b.nodes[0].n << std::endl, 0));
+//          (std::cerr << std::abs ((double)b.nodes[b.nodes[0].left].n - (double)b.nodes[b.nodes[0].right].n) << " <= " << 0.4 * b.nodes[0].n << std::endl, 
+//           std::cerr << " avg_pred = " << b.nodes[0].sum_pred / b.nodes[0].sum_pred_n << std::endl, 
+//           0));
 
 }
 
