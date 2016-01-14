@@ -155,21 +155,23 @@ uint32_t predict_from(recall_tree& b,  base_learner& base, example& ec, uint32_t
   return cn;
 }
 
-float recall_from (recall_tree& b,  base_learner& base, example& ec, uint32_t cn, uint32_t depth, float optimistic, uint32_t* mega = 0)
+float candidate_from (recall_tree& b,  base_learner& base, example& ec, uint32_t cn, uint32_t depth, uint32_t* mega = 0)
 {
+  const double epsilon = 1e-6;
   uint32_t leaf = predict_from (b, base, ec, cn, depth);
   assert (leaf > 0);
   if (mega) *mega=leaf;
 
-  node_label_stats* ls;
-  for (ls = b.nodes[leaf].labelstats.begin; 
-       ls != b.nodes[leaf].labelstats.end && ls < b.nodes[leaf].labelstats.begin + b.max_candidates; 
-       ++ls)
+  double min_cand_label_count = 
+    b.nodes[leaf].labelstats.size () < b.max_candidates 
+      ? 0.0 : b.nodes[leaf].labelstats[b.max_candidates].label_count;
+
+  double true_label_count = 0;
+
+  size_t index;
+  for (index = 0; index < b.nodes[leaf].labelstats.size (); ++index)
     {
-//      std::cerr << "leaf = " << leaf 
-//                << " ls[" << (ls - b.nodes[leaf].labelstats.begin) << "].label = " << ls->label 
-//                << "( ls[" << (ls - b.nodes[leaf].labelstats.begin) << "].label_count = " << ls->label_count << ")"
-//                << " ?= " << ec.l.multi.label << std::endl;
+      node_label_stats* ls = b.nodes[leaf].labelstats.begin + index;
 
       assert (ls + 1 == b.nodes[leaf].labelstats.end ||
               ls[0].label_count >= ls[1].label_count || 
@@ -179,41 +181,57 @@ float recall_from (recall_tree& b,  base_learner& base, example& ec, uint32_t cn
 
 
       if (ls->label == ec.l.multi.label)
-        return 1.0;
+        {
+          true_label_count = ls->label_count;
+
+          if (index < b.max_candidates)
+            {
+              // NB: no epsilon on purpose 
+
+              assert (min_cand_label_count <= true_label_count);
+              return min_cand_label_count - true_label_count;
+            }
+          else
+            {
+              assert (min_cand_label_count >= true_label_count);
+              return std::max (min_cand_label_count - true_label_count,
+                               epsilon);
+            }
+        }
     }
 
-  //std::cerr << "ls (" << ls << ") ?= b.nodes[leaf].labelstats.end (" << b.nodes[leaf].labelstats.end << ")" << std::endl;
-  return b.nodes[leaf].labelstats.size () < b.max_candidates ? optimistic : 0.0;
+  return std::max (min_cand_label_count, epsilon);
 }
 
 void predict(recall_tree& b,  base_learner& base, example& ec)
 { 
   uint32_t leaf; 
-  //ec.pred.multiclass = recall_from (b, base, ec, 0, 0, 0.0, &leaf) ? leaf : leaf ; 
-  ec.pred.multiclass = recall_from (b, base, ec, 0, 0, 0.0, &leaf) ? ec.l.multi.label : (1 + ec.l.multi.label);
+  ec.pred.multiclass = candidate_from (b, base, ec, 0, 0, &leaf) > 0.f ? 1 + ec.l.multi.label : ec.l.multi.label;
   ec.num_features = leaf;
   assert(leaf>0);
 }
 
 float train_node(recall_tree& b, base_learner& base, example& ec, uint32_t& current, uint32_t depth)
 { 
+  assert (b.nodes[current].internal);
+
+//  std::cerr << "call candidate_left" << std::endl;
+  float candidate_left = candidate_from (b, base, ec, b.nodes[current].left, 1+b.nodes[current].depth);
+//  std::cerr << "candidate_left = " << candidate_left << std::endl;
+//  std::cerr << "call candidate_right" << std::endl;
+  float candidate_right = candidate_from (b, base, ec, b.nodes[current].right, 1+b.nodes[current].depth);
+//  std::cerr << "candidate_right = " << candidate_right << std::endl;
+
   MULTICLASS::label_t mc = ec.l.multi;
   uint32_t save_pred = ec.pred.multiclass;
 
-  assert (b.nodes[current].internal);
+  ec.l.simple = { candidate_left < candidate_right ? -1.f : 1.f, 
+                  std::min (mc.weight, 
+                            std::abs (candidate_left - candidate_right)),
+                  0. };
 
-  float recall_left = recall_from (b, base, ec, b.nodes[current].left, 1+b.nodes[current].depth, 1.0);
-  float recall_right = recall_from (b, base, ec, b.nodes[current].right, 1+b.nodes[current].depth, 1.0);
+//  std::cerr << "ec.l.simple.label = " << ec.l.simple.label << " candidate_left = " << candidate_left << " candidate_right = " << candidate_right << std::endl;
 
-//  ec.l.simple = { avg_pred > 0 ? -1.f : 1.f, std::abs (avg_pred), 0. };
-//  base.learn(ec, b.nodes[current].base_router);	// depth
-
-  //std::cerr << ( recall_left == recall_right  ? (recall_left < 0.5 ? "0" : "1") : ( recall_left > recall_right ? "-" : "+" ) );
-
-  ec.l.simple = { recall_left > recall_right ? -1.f : 1.f, std::abs (recall_left - recall_right), 0. };
-
-  //std::cerr << "ec.l.simple.label = " << ec.l.simple.label << " recall_left = " << recall_left << " recall_right = " << recall_right << std::endl;
-  
   base.learn(ec, b.nodes[current].base_router);	// depth
 
   b.nodes[current].n++; // TODO: importance weight from example
@@ -225,9 +243,11 @@ float train_node(recall_tree& b, base_learner& base, example& ec, uint32_t& curr
   return ec.partial_prediction;
 }
 
-void update_recall_estimate (recall_tree& b, uint32_t cn, example& ec)
+void insert_example_at_leaf (recall_tree& b, uint32_t cn, example& ec)
 {
   assert (! b.nodes[cn].internal);
+
+//  std::cerr << "insert multilabel " << ec.l.multi.label << " at leaf " << cn << std::endl;
 
   node_label_stats* ls;
 
@@ -283,7 +303,7 @@ void learn(recall_tree& b, base_learner& base, example& ec)
       depth++;
     }
 
-    update_recall_estimate (b, cn, ec);
+    insert_example_at_leaf (b, cn, ec);
   }
 }
 
