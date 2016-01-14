@@ -57,6 +57,7 @@ typedef struct
   uint32_t right;//right child
   uint32_t n;//total events at the node
   double sum_pred;
+  uint32_t sum_pred_n;
 
 } node;
 
@@ -79,6 +80,7 @@ inline void init_leaf(node& n)
   n.right = 0;
   n.n = 0;
   n.sum_pred = 0.;
+  n.sum_pred_n = 0;
 }
 
 inline node init_node()
@@ -120,14 +122,14 @@ void init_tree(recall_tree& b, uint32_t root, uint32_t depth)
 
 void init_tree(recall_tree& b)
 { b.nodes.push_back(init_node());
-  init_tree (b, 0, 0);
+  init_tree (b, 0, 1);
   b.max_routers = b.nodes.size();
   assert (b.routers_used <= b.max_routers);
 }
 
 inline uint32_t descend(node& n, float prediction)
 { 
-  float avg_pred = n.sum_pred / std::max (n.n, 1U);
+  float avg_pred = n.sum_pred / std::max (n.sum_pred_n, 1U);
 
 //  std::cerr << " node = " << &n 
 //            << " prediction = " << prediction << " avg_pred =  " << avg_pred 
@@ -217,7 +219,14 @@ void predict(recall_tree& b,  base_learner& base, example& ec)
 { 
   uint32_t leaf; 
   ec.pred.multiclass = candidate_from (b, base, ec, 0, 0, &leaf) > 0.f ? 1 + ec.l.multi.label : ec.l.multi.label;
-  ec.num_features = leaf;
+  ec.num_features = b.nodes[leaf].depth;
+
+  assert (b.nodes[b.nodes[0].left].n + b.nodes[b.nodes[0].right].n == b.nodes[0].n ||
+          (std::cerr << b.nodes[b.nodes[0].left].n << " + " << b.nodes[b.nodes[0].right].n << " != " << b.nodes[0].n << std::endl, 0));
+
+//  assert (b.nodes[0].n < 1000 || std::abs ((double)b.nodes[b.nodes[0].left].n - (double)b.nodes[b.nodes[0].right].n) <= 0.4 * b.nodes[0].n ||
+//          (std::cerr << std::abs ((double)b.nodes[b.nodes[0].left].n - (double)b.nodes[b.nodes[0].right].n) << " <= " << 0.4 * b.nodes[0].n << std::endl, 0));
+
 }
 
 float train_node(recall_tree& b, base_learner& base, example& ec, uint32_t& current, uint32_t depth)
@@ -235,7 +244,7 @@ float train_node(recall_tree& b, base_learner& base, example& ec, uint32_t& curr
 
   base.learn(ec, b.nodes[current].base_router);	// depth
 
-  b.nodes[current].n++; // TODO: importance weight from example
+  b.nodes[current].sum_pred_n++; // TODO: importance weight from example
   b.nodes[current].sum_pred += ec.pred.scalar;
 
   ec.l.multi = mc;
@@ -298,8 +307,15 @@ void learn(recall_tree& b, base_learner& base, example& ec)
 
     while(b.nodes[cn].internal)
     { 
+      float which = train_node (b, base, ec, cn, depth);
+      uint32_t newcn = descend(b.nodes[cn], which);
+      bool cond = b.nodes[cn].recall_lbest >= b.nodes[newcn].recall_lbest;
       insert_example_at_node (b, cn, ec);
-      cn = descend(b.nodes[cn], train_node (b, base, ec, cn, depth));
+      cn = newcn;
+
+      if (cond)
+        break;
+
       depth++;
     }
     insert_example_at_node (b, cn, ec);
