@@ -388,7 +388,7 @@ void synthetic_decycle(stagewise_poly &poly)
     }
 }
 
-void synthetic_create_rec(stagewise_poly &poly, float v, float &w)
+void synthetic_create_rec(stagewise_poly &poly, float v, weight &w)
 { //Note: need to un_ft_shift since gd::foreach_feature bakes in the offset.
   uint64_t wid_atomic = wid_mask(poly, un_ft_offset(poly, (uint64_t)((&w - poly.all->reg.weight_vector))));
   uint64_t wid_cur = child_wid(poly, wid_atomic, poly.synth_rec_f.weight_index);

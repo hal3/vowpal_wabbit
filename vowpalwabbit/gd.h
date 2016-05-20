@@ -47,7 +47,7 @@ inline void vec_add_multipredict(multipredict_info& mp, const float fx, uint64_t
 }
 
 // iterate through one namespace (or its part), callback function T(some_data_R, feature_value_x, feature_weight)
-template <class R, void (*T)(R&, const float, float&)>
+template <class R, void (*T)(R&, const float, weight&)>
 inline void foreach_feature(weight* weight_vector, uint64_t weight_mask, features& fs, R& dat, uint64_t offset=0, float mult=1.)
 {
   for (features::iterator& f : fs)
@@ -63,7 +63,7 @@ void foreach_feature(weight* /*weight_vector*/, uint64_t /*weight_mask*/, featur
 }
 
 // iterate through all namespaces and quadratic&cubic features, callback function T(some_data_R, feature_value_x, S)
-// where S is EITHER float& feature_weight OR uint64_t feature_index
+// where S is EITHER weight& feature_weight OR uint64_t feature_index
 template <class R, class S, void (*T)(R&, float, S)>
 inline void foreach_feature(vw& all, example& ec, R& dat)
 { uint64_t offset = ec.ft_offset;
@@ -75,12 +75,12 @@ for (features& f : ec)
 }
 
 // iterate through all namespaces and quadratic&cubic features, callback function T(some_data_R, feature_value_x, feature_weight)
-template <class R, void (*T)(R&, float, float&)>
+template <class R, void (*T)(R&, float, weight&)>
 inline void foreach_feature(vw& all, example& ec, R& dat)
-{ foreach_feature<R,float&,T>(all, ec, dat);
+{ foreach_feature<R,weight&,T>(all, ec, dat);
 }
 
-inline void vec_add(float& p, const float fx, float& fw) { p += fw * fx; }
+inline void vec_add(float& p, const float fx, weight& fw) { p += fw * fx; }
 
 inline float inline_predict(vw& all, example& ec)
 { float temp = ec.l.simple.initial;

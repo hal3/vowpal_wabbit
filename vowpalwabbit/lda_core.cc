@@ -80,7 +80,7 @@ struct lda
   inline float lgamma(float x);
   inline float powf(float x, float p);
   inline void expdigammify(vw &all, float *gamma);
-  inline void expdigammify_2(vw &all, float *gamma, float *norm);
+  inline void expdigammify_2(vw &all, weight *gamma, float *norm);
 };
 
 // #define VW_NO_INLINE_SIMD
@@ -403,19 +403,19 @@ template <> inline void expdigammify<float, USE_SIMD>(vw &all, float *gamma, flo
 #endif
 }
 
-template <typename T, const lda_math_mode mtype>
-inline void expdigammify_2(vw &all, T *gamma, T *norm, const T threshold)
+template <typename T, typename T2, const lda_math_mode mtype>
+inline void expdigammify_2(vw &all, T2 *gamma, T *norm, const T threshold)
 { std::transform(gamma, gamma + all.lda, norm, gamma, [threshold](float g, float n)
   { return fmax(threshold, exponential<T, mtype>(digamma<T, mtype>(g) - n));
   });
 }
-template <> inline void expdigammify_2<float, USE_SIMD>(vw &all, float *gamma, float *norm, const float threshold)
+template <> inline void expdigammify_2<float, float, USE_SIMD>(vw &all, float *gamma, float *norm, const float threshold)
 {
 #if defined(HAVE_SIMD_MATHMODE)
   vexpdigammify_2(all, gamma, norm, threshold);
 #else
   // Do something sensible if SIMD math isn't available:
-  expdigammify_2<float, USE_FAST_APPROX>(all, gamma, norm, threshold);
+  expdigammify_2<float, float, USE_FAST_APPROX>(all, gamma, norm, threshold);
 #endif
 }
 } // namespace ldamath
@@ -492,16 +492,16 @@ void lda::expdigammify(vw &all, float *gamma)
   }
 }
 
-void lda::expdigammify_2(vw &all, float *gamma, float *norm)
+void lda::expdigammify_2(vw &all, weight *gamma, float *norm)
 { switch (mmode)
   { case USE_FAST_APPROX:
-      ldamath::expdigammify_2<float, USE_FAST_APPROX>(all, gamma, norm, underflow_threshold());
+      ldamath::expdigammify_2<float, weight, USE_FAST_APPROX>(all, gamma, norm, underflow_threshold());
       break;
     case USE_PRECISE:
-      ldamath::expdigammify_2<float, USE_PRECISE>(all, gamma, norm, underflow_threshold());
+      ldamath::expdigammify_2<float, weight, USE_PRECISE>(all, gamma, norm, underflow_threshold());
       break;
     case USE_SIMD:
-      ldamath::expdigammify_2<float, USE_SIMD>(all, gamma, norm, underflow_threshold());
+      ldamath::expdigammify_2<float, weight, USE_SIMD>(all, gamma, norm, underflow_threshold());
       break;
     default:
       std::cerr << "lda::expdigammify_2: Trampled or invalid math mode, aborting" << std::endl;
@@ -545,7 +545,7 @@ float theta_kl(lda &l, v_array<float> &Elogtheta, float *gamma)
   return kl;
 }
 
-static inline float find_cw(lda &l, float *u_for_w, float *v)
+static inline float find_cw(lda &l, weight *u_for_w, float *v)
 { return 1.0f / std::inner_product(u_for_w, u_for_w + l.topics, v, 0.0f);
 }
 
@@ -588,7 +588,7 @@ float lda_loop(lda &l, v_array<float> &Elogtheta, float *v, weight *weights, exa
     doc_length = 0;
     for (features& fs : *ec)
       { for (features::iterator& f : fs)
-          { float *u_for_w = &weights[(f.index() & l.all->reg.weight_mask) + l.topics + 1];
+          { weight *u_for_w = &weights[(f.index() & l.all->reg.weight_mask) + l.topics + 1];
             float c_w = find_cw(l, u_for_w, v);
             xc_w = c_w * f.value();
             score += -f.value() * log(c_w);
@@ -727,11 +727,11 @@ void learn_batch(lda &l)
   { if (last_weight_index == s->f.weight_index)
       continue;
     last_weight_index = s->f.weight_index;
-    float *weights_for_w = &(weights[s->f.weight_index & l.all->reg.weight_mask]);
+    weight *weights_for_w = &(weights[s->f.weight_index & l.all->reg.weight_mask]);
     float decay_component =
       l.decay_levels.end()[-2] - l.decay_levels.end()[(int)(-1 - l.example_t + weights_for_w[l.all->lda])];
     float decay = fmin(1.0f, correctedExp(decay_component));
-    float *u_for_w = weights_for_w + l.all->lda + 1;
+    weight *u_for_w = weights_for_w + l.all->lda + 1;
 
     weights_for_w[l.all->lda] = (float)l.example_t;
     for (size_t k = 0; k < l.all->lda; k++)
@@ -758,7 +758,7 @@ void learn_batch(lda &l)
     while (next <= &l.sorted_features.back() && next->f.weight_index == s->f.weight_index)
       next++;
 
-    float *word_weights = &(weights[s->f.weight_index & l.all->reg.weight_mask]);
+    weight *word_weights = &(weights[s->f.weight_index & l.all->reg.weight_mask]);
     for (size_t k = 0; k < l.all->lda; k++)
     { float new_value = minuseta * word_weights[k];
       word_weights[k] = new_value;
@@ -766,7 +766,7 @@ void learn_batch(lda &l)
 
     for (; s != next; s++)
     { float *v_s = &(l.v[s->document * l.all->lda]);
-      float *u_for_w = &weights[(s->f.weight_index & l.all->reg.weight_mask) + l.all->lda + 1];
+      weight *u_for_w = &weights[(s->f.weight_index & l.all->reg.weight_mask) + l.all->lda + 1];
       float c_w = eta * find_cw(l, u_for_w, v_s) * s->f.x;
       for (size_t k = 0; k < l.all->lda; k++)
       { float new_value = u_for_w[k] * v_s[k] * c_w;

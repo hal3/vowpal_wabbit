@@ -45,8 +45,8 @@ struct uncertainty
 
 inline float sign(float w) { if (w < 0.) return -1.; else  return 1.;}
 
-inline void predict_with_confidence(uncertainty& d, const float fx, float& fw)
-{ float* w = &fw;
+inline void predict_with_confidence(uncertainty& d, const float fx, weight& fw)
+{ weight* w = &fw;
   d.pred += w[W_XT] * fx;
   float sqrtf_ng2 = sqrtf(w[W_G2]);
   float uncertain = ( (d.b.data.ftrl_beta+sqrtf_ng2)/d.b.data.ftrl_alpha +d.b.data.l2_lambda);
@@ -54,9 +54,9 @@ inline void predict_with_confidence(uncertainty& d, const float fx, float& fw)
 }
 
 float sensitivity(ftrl& b, base_learner& base, example& ec)
-{ 	uncertainty uncetain(b);
-	GD::foreach_feature<uncertainty, predict_with_confidence>(*(b.all), ec, uncetain);
-	return uncetain.score;
+{ uncertainty uncetain(b);
+  GD::foreach_feature<uncertainty, predict_with_confidence>(*(b.all), ec, uncetain);
+  return uncetain.score;
 }
 
 void predict(ftrl& b, base_learner&, example& ec)
@@ -78,8 +78,8 @@ void multipredict(ftrl& b, base_learner&, example& ec, size_t count, size_t step
       pred[c].scalar = GD::finalize_prediction(all.sd, pred[c].scalar);
 }
 
-void inner_update_proximal(update_data& d, float x, float& wref)
-{ float* w = &wref;
+void inner_update_proximal(update_data& d, float x, weight& wref)
+{ weight* w = &wref;
   float gradient = d.update * x;
   float ng2 = w[W_G2] + gradient * gradient;
   float sqrt_ng2 = sqrtf(ng2);
@@ -99,8 +99,8 @@ void inner_update_proximal(update_data& d, float x, float& wref)
   }
 }
 
-void inner_update_pistol_state_and_predict(update_data& d, float x, float& wref)
-{ float* w = &wref;
+void inner_update_pistol_state_and_predict(update_data& d, float x, weight& wref)
+{ weight* w = &wref;
 
   float fabs_x = fabs(x);
   if (fabs_x > w[W_MX])
@@ -113,8 +113,8 @@ void inner_update_pistol_state_and_predict(update_data& d, float x, float& wref)
   d.predict +=  w[W_XT]*x;
 }
 
-void inner_update_pistol_post(update_data& d, float x, float& wref)
-{ float* w = &wref;
+void inner_update_pistol_post(update_data& d, float x, weight& wref)
+{ weight* w = &wref;
   float gradient = d.update * x;
 
   w[W_ZT] += -gradient;

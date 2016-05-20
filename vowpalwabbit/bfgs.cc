@@ -81,7 +81,7 @@ struct bfgs
   // set by initializer
   int mem_stride;
   bool output_regularizer;
-  float* mem;
+  weight* mem;
   double* rho;
   double* alpha;
 
@@ -150,7 +150,7 @@ float bfgs_predict(vw& all, example& ec)
   return GD::finalize_prediction(all.sd, ec.partial_prediction);
 }
 
-inline void add_grad(float& d, float f, float& fw)
+inline void add_grad(float& d, float f, weight& fw)
 { fw += d * f;
 }
 
@@ -169,7 +169,7 @@ float predict_and_gradient(vw& all, example &ec)
   return fp;
 }
 
-inline void add_precond(float& d, float f, float& fw)
+inline void add_precond(float& d, float f, weight& fw)
 { fw += d * f * f;
 }
 
@@ -222,7 +222,7 @@ float direction_magnitude(vw& all)
   return (float)ret;
 }
 
-void bfgs_iter_start(vw& all, bfgs& b, float* mem, int& lastj, double importance_weight_sum, int&origin)
+void bfgs_iter_start(vw& all, bfgs& b, weight* mem, int& lastj, double importance_weight_sum, int&origin)
 { uint32_t length = 1 << all.num_bits;
   size_t stride = 1 << all.reg.stride_shift;
   weight* w = all.reg.weight_vector;
@@ -247,13 +247,13 @@ void bfgs_iter_start(vw& all, bfgs& b, float* mem, int& lastj, double importance
             g1_Hg1/importance_weight_sum, "", "", "");
 }
 
-void bfgs_iter_middle(vw& all, bfgs& b, float* mem, double* rho, double* alpha, int& lastj, int &origin)
+void bfgs_iter_middle(vw& all, bfgs& b, weight* mem, double* rho, double* alpha, int& lastj, int &origin)
 { uint32_t length = 1 << all.num_bits;
   size_t stride = 1 << all.reg.stride_shift;
   weight* w = all.reg.weight_vector;
 
-  float* mem0 = mem;
-  float* w0 = w;
+  weight* mem0 = mem;
+  weight* w0 = w;
 
   // implement conjugate gradient
   if (b.m==0)
@@ -369,7 +369,7 @@ void bfgs_iter_middle(vw& all, bfgs& b, float* mem, double* rho, double* alpha, 
     rho[j] = rho[j-1];
 }
 
-double wolfe_eval(vw& all, bfgs& b, float* mem, double loss_sum, double previous_loss_sum, double step_size, double importance_weight_sum, int &origin, double& wolfe1)
+double wolfe_eval(vw& all, bfgs& b, weight* mem, double loss_sum, double previous_loss_sum, double step_size, double importance_weight_sum, int &origin, double& wolfe1)
 { uint32_t length = 1 << all.num_bits;
   size_t stride = 1 << all.reg.stride_shift;
   weight* w = all.reg.weight_vector;
@@ -498,7 +498,7 @@ void zero_state(vw& all)
   }
 }
 
-double derivative_in_direction(vw& all, bfgs& b, float* mem, int &origin)
+double derivative_in_direction(vw& all, bfgs& b, weight* mem, int &origin)
 { double ret = 0.;
   uint32_t length = 1 << all.num_bits;
   size_t stride = 1 << all.reg.stride_shift;
@@ -874,7 +874,7 @@ void save_load(bfgs& b, io_buf& model_file, bool read, bool text)
     int m = b.m;
 
     b.mem_stride = (m==0) ? CG_EXTRA : 2*m;
-    b.mem = calloc_or_throw<float>(all->length()*b.mem_stride);
+    b.mem = calloc_or_throw<weight>(all->length()*b.mem_stride);
     b.rho = calloc_or_throw<double>(m);
     b.alpha = calloc_or_throw<double>(m);
 

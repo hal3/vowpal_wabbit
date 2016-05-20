@@ -30,8 +30,8 @@ struct svrg
 // stable versus inner weights.
 
 template<int offset>
-inline void vec_add(float& p, const float x, float& w)
-{ float* ws = &w;
+inline void vec_add(float& p, const float x, weight& w)
+{ weight* ws = &w;
   p += x * ws[offset];
 }
 
@@ -67,13 +67,13 @@ struct update
   float norm;
 };
 
-inline void update_inner_feature(update& u, float x, float& w)
-{ float* ws = &w;
+inline void update_inner_feature(update& u, float x, weight& w)
+{ weight* ws = &w;
   w -= u.eta * ((u.g_scalar_inner - u.g_scalar_stable) * x + ws[W_STABLEGRAD] / u.norm);
 }
 
-inline void update_stable_feature(float& g_scalar, float x, float& w)
-{ float* ws = &w;
+inline void update_stable_feature(float& g_scalar, float x, weight& w)
+{ weight* ws = &w;
   ws[W_STABLEGRAD] += g_scalar * x;
 }
 

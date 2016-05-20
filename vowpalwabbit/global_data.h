@@ -14,6 +14,7 @@ license as described in the file LICENSE.
 #include <boost/program_options.hpp>
 namespace po = boost::program_options;
 
+#include "half.hpp"
 #include "v_array.h"
 #include "parse_primitives.h"
 #include "loss_functions.h"
@@ -111,7 +112,9 @@ struct version_struct
 
 const version_struct version(PACKAGE_VERSION);
 
-typedef float weight;
+using namespace half_float::literal;
+typedef half_float::half weight;
+//typedef float weight;
 
 struct regressor
 { weight* weight_vector;

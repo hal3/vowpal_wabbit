@@ -18,6 +18,7 @@ Alekh Agarwal and John Langford, with help Olivier Chapelle.
 using namespace std;
 
 void add_float(float& c1, const float& c2) { c1 += c2; }
+void add_weight(weight& c1, const weight& c2) { c1 += c2; }
 
 void accumulate(vw& all, regressor& reg, size_t o)
 { uint32_t length = 1 << all.num_bits; //This is size of gradient
@@ -99,7 +100,7 @@ void accumulate_weighted_avg(vw& all, regressor& reg)
       weights[stride*i] = 0;
     }
 
-  all_reduce<float, add_float>(all, weights, length*stride);
+  all_reduce<weight, add_weight>(all, weights, length*stride);
 
   delete[] local_weights;
 }

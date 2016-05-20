@@ -96,7 +96,7 @@ static inline float InvSqrt(float x)
 }
 
 template<bool sqrt_rate, bool feature_mask_off, size_t adaptive, size_t normalized, size_t spare>
-inline void update_feature(float& update, float x, float& fw)
+inline void update_feature(float& update, float x, weight& fw)
 { weight* w = &fw;
   if(feature_mask_off || fw != 0.)
   { if (spare != 0)
@@ -163,10 +163,10 @@ struct string_value
   friend bool operator<(const string_value& first, const string_value& second);
 };
 
-inline float sign(float w) { if (w < 0.) return -1.; else  return 1.;}
+inline weight sign(weight w) { if (w < 0.) return -1.0_h; else  return 1.0_h;}
 
-inline float trunc_weight(const float w, const float gravity)
-{ return (gravity < fabsf(w)) ? w - sign(w) * gravity : 0.f;
+inline weight trunc_weight(const weight w, const weight gravity)
+{ return (gravity < fabsf(w)) ? w - sign(w) * gravity : 0._h;
 }
 
 bool operator<(const string_value& first, const string_value& second)
@@ -215,7 +215,7 @@ inline void audit_feature(audit_results& dat, const float ft_weight, const uint6
   if(dat.all.audit)
   { ostringstream tempstream;
     tempstream << ':' << (index >> stride_shift) << ':' << ft_weight
-               << ':' << trunc_weight(weights[index], (float)dat.all.sd->gravity) * (float)dat.all.sd->contraction;
+               << ':' << trunc_weight(weights[index], (weight)dat.all.sd->gravity) * (float)dat.all.sd->contraction;
 
     if(dat.all.adaptive)
       tempstream << '@' << weights[index+1];
@@ -265,12 +265,12 @@ void print_features(vw& all, example& ec)
     for (features& fs : ec)
     { if (fs.space_names.size() > 0)
         for (features::iterator_all& f : fs.values_indices_audit())
-	      {
+        {
           audit_interaction(dat, f.audit().get());
-	        audit_feature(dat, f.value(), f.index() + ec.ft_offset);
-	        audit_interaction(dat, NULL);
-	      }
-	    else
+          audit_feature(dat, f.value(), f.index() + ec.ft_offset);
+          audit_interaction(dat, NULL);
+        }
+      else
         for (features::iterator& f : fs)
           audit_feature(dat, f.value(), f.index() + ec.ft_offset);
     }
@@ -310,21 +310,21 @@ float finalize_prediction(shared_data* sd, float ret)
 }
 
 struct trunc_data
-{ float prediction;
-  float gravity;
+{ weight prediction;
+  weight gravity;
 };
 
-inline void vec_add_trunc(trunc_data& p, const float fx, float& fw)
-{ p.prediction += trunc_weight(fw, p.gravity) * fx;
+inline void vec_add_trunc(trunc_data& p, const float fx, weight& fw)
+{ p.prediction += trunc_weight(fw, (weight)p.gravity) * fx;
 }
 
 inline float trunc_predict(vw& all, example& ec, double gravity)
-{ trunc_data temp = {ec.l.simple.initial, (float)gravity};
+{ trunc_data temp = {(weight)ec.l.simple.initial, (weight)gravity};
   foreach_feature<trunc_data, vec_add_trunc>(all, ec, temp);
   return temp.prediction;
 }
 
-inline void vec_add_print(float&p, const float fx, float& fw)
+inline void vec_add_print(float&p, const float fx, weight& fw)
 { p += fw * fx;
   cerr << " + " << fw << "*" << fx;
 }
@@ -347,7 +347,7 @@ void predict(gd& g, base_learner&, example& ec)
 inline void vec_add_trunc_multipredict(multipredict_info& mp, const float fx, uint64_t fi)
 { weight*w = mp.reg->weight_vector + (fi & mp.reg->weight_mask);
   for (size_t c=0; c<mp.count; c++)
-  { mp.pred[c].scalar += fx * trunc_weight(*w, mp.gravity);
+  { mp.pred[c].scalar += fx * trunc_weight(*w, (weight)mp.gravity);
     w += mp.step;
   }
 }
@@ -383,7 +383,7 @@ struct power_data
 };
 
 template<bool sqrt_rate, size_t adaptive, size_t normalized>
-inline float compute_rate_decay(power_data& s, float& fw)
+inline float compute_rate_decay(power_data& s, weight& fw)
 { weight* w = &fw;
   float rate_decay = 1.f;
   if(adaptive)
@@ -418,8 +418,8 @@ const float x_min = 1.084202e-19f;
 const float x2_min = x_min*x_min;
 
 template<bool sqrt_rate, bool feature_mask_off, size_t adaptive, size_t normalized, size_t spare, bool stateless>
-inline void pred_per_update_feature(norm_data& nd, float x, float& fw)
-{ if(feature_mask_off || fw != 0.)
+inline void pred_per_update_feature(norm_data& nd, float x, weight& fw)
+{ if(feature_mask_off || fw != 0._h)
   { weight* w = &fw;
     float x2 = x * x;
     if (x2 < x2_min)
@@ -561,7 +561,7 @@ void sync_weights(vw& all)
   uint64_t length = (uint64_t)1 << all.num_bits;
   uint64_t stride = (uint64_t)1 << all.reg.stride_shift;
   for(uint64_t i = 0; i < length && all.reg_mode; i++)
-    all.reg.weight_vector[stride*i] = trunc_weight(all.reg.weight_vector[stride*i], (float)all.sd->gravity) * (float)all.sd->contraction;
+    all.reg.weight_vector[stride*i] = trunc_weight(all.reg.weight_vector[stride*i], (weight)all.sd->gravity) * (float)all.sd->contraction;
   all.sd->gravity = 0.;
   all.sd->contraction = 1.;
 }

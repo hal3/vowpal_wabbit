@@ -55,7 +55,7 @@ void predict_or_learn(LRQFAstate& lrq, base_learner& base, example& ec)
             uint64_t lindex = fs.indicies[lfn];
             for (unsigned int n = 1; n <= k; ++n)
               { uint64_t lwindex = (uint64_t)(lindex + ((rfd_id*k+n) << all.reg.stride_shift)); // a feature has k weights in each field
-                float* lw = &all.reg.weight_vector[lwindex & all.reg.weight_mask];
+                weight* lw = &all.reg.weight_vector[lwindex & all.reg.weight_mask];
 
                 // perturb away from saddle point at (0, 0)
                 if (is_learn && ! example_is_test (ec) && *lw == 0)
