@@ -16,6 +16,7 @@
 using namespace std;
 using namespace LEARNER;
 using namespace CB;
+using namespace ACTION_SCORE;
 
 // doubly robust
 #define CB_TYPE_DR 0
@@ -45,7 +46,7 @@ struct cb_adf
   uint32_t mtr_example;
   v_array<COST_SENSITIVE::label> mtr_cs_labels;
   v_array<example*> mtr_ec_seq;
-  MULTILABEL::labels mtr_multilabels;
+  action_scores a_s;
   uint64_t action_sum;
   uint64_t event_sum;
 
@@ -59,6 +60,9 @@ struct cb_adf
 
 namespace CB_ADF
 {
+  bool example_is_newline_not_header(example& ec)
+  { return (example_is_newline(ec) && !CB::ec_is_example_header(ec)); }
+
 void gen_cs_example_ips(v_array<example*> examples, v_array<COST_SENSITIVE::label>& cs_labels)
 { if (cs_labels.size() < examples.size())
   { cs_labels.resize(examples.size());
@@ -103,7 +107,7 @@ void gen_cs_example_dr(cb_adf& c, v_array<example*> examples, v_array<COST_SENSI
   if (shared) startK = 1;
 
   for (size_t i = 0; i < examples.size(); i++)
-  { if (example_is_newline(*examples[i])) continue;
+  { if (example_is_newline_not_header(*examples[i])) continue;
 
     COST_SENSITIVE::wclass wc;
     wc.class_index = 0;
@@ -145,10 +149,11 @@ void gen_cs_example_dr(cb_adf& c, v_array<example*> examples, v_array<COST_SENSI
   }
 }
 
-void get_observed_cost(cb_adf& mydata, v_array<example*>& examples)
+  CB::cb_class get_observed_cost(v_array<example*>& examples)
 { CB::label ld;
   ld.costs = v_init<cb_class>();
   int index = -1;
+  CB::cb_class known_cost;
 
   for (example*& ec : examples)
   { if (ec->l.cb.costs.size() == 1 &&
@@ -162,18 +167,19 @@ void get_observed_cost(cb_adf& mydata, v_array<example*>& examples)
 
   // handle -1 case.
   if (index == -1)
-  { mydata.known_cost.probability = -1;
-    return;
+  { known_cost.probability = -1;
+    return known_cost;
     //std::cerr << "None of the examples has known cost. Exiting." << endl;
     //throw exception();
   }
 
   bool shared = CB::ec_is_example_header(*examples[0]);
 
-  mydata.known_cost = ld.costs[0];
-  mydata.known_cost.action = index;
+  known_cost = ld.costs[0];
+  known_cost.action = index;
   if(shared)  // take care of shared example
-    mydata.known_cost.action--;
+    known_cost.action--;
+  return known_cost;
 }
 
 template<bool is_learn>
@@ -204,14 +210,14 @@ void call_predict_or_learn(cb_adf& mydata, base_learner& base, v_array<example*>
   for (example* ec : examples)
     ec->l.cb = cb_labels[i++];
 
-  if (!mydata.rank_all)
-  { uint32_t action = 0;
-    for (size_t i = 0; i < examples.size(); i++)
-      if (!CB::ec_is_example_header(*examples[i]) && !example_is_newline(*examples[i]))
-        if (examples[i]->pred.multiclass != 0)
-          action = examples[i]->pred.multiclass;
-    examples[0]->pred.multiclass = action;
-  }
+  // if (!mydata.rank_all)
+  //   { uint32_t action = 0;
+  //     for (size_t i = 0; i < examples.size(); i++)
+  // 	if (!CB::ec_is_example_header(*examples[i]) && !example_is_newline_not_header(*examples[i]))
+  // 	  if (examples[i]->pred.multiclass != 0)
+  // 	    action = examples[i]->pred.multiclass;
+  //     examples[0]->pred.multiclass = action;
+  // }
 }
 
 void learn_IPS(cb_adf& mydata, base_learner& base, v_array<example*>& examples)
@@ -220,7 +226,8 @@ void learn_IPS(cb_adf& mydata, base_learner& base, v_array<example*>& examples)
 }
 
 void learn_DR(cb_adf& mydata, base_learner& base, v_array<example*>& examples)
-{ gen_cs_example_dr(mydata, examples, mydata.cs_labels);
+{
+  gen_cs_example_dr(mydata, examples, mydata.cs_labels);
   call_predict_or_learn<true>(mydata, base, examples, mydata.cb_labels, mydata.cs_labels);
 }
 
@@ -262,22 +269,16 @@ void gen_cs_example_MTR(cb_adf& data, v_array<example*>& ec_seq, v_array<example
   }
 }
 
-template<class T> void swap(T& ele1, T& ele2)
-{ T temp = ele2;
-  ele2 = ele1;
-  ele1 = temp;
-}
-
 template<bool predict>
 void learn_MTR(cb_adf& mydata, base_learner& base, v_array<example*>& examples)
-{ uint32_t action = 0;
+{ //uint32_t action = 0;
   if (predict) //first get the prediction to return
   { gen_cs_example_ips(examples, mydata.cs_labels);
     call_predict_or_learn<false>(mydata, base, examples, mydata.cb_labels, mydata.cs_labels);
-    if (!mydata.rank_all) //preserve prediction
-      action = examples[0]->pred.multiclass;
-    else
-      swap(examples[0]->pred.multilabels, mydata.mtr_multilabels);
+    //    if (!mydata.rank_all) //preserve prediction
+    //      action = examples[0]->pred.multiclass;
+    //    else
+      swap(examples[0]->pred.a_s, mydata.a_s);
   }
   //second train on _one_ action (which requires up to 3 examples).
   //We must go through the cost sensitive classifier layer to get
@@ -289,10 +290,10 @@ void learn_MTR(cb_adf& mydata, base_learner& base, v_array<example*>& examples)
   call_predict_or_learn<true>(mydata, base, mydata.mtr_ec_seq, mydata.cb_labels, mydata.mtr_cs_labels);
   examples[mydata.mtr_example]->num_features = nf;
   examples[mydata.mtr_example]->weight = old_weight;
-  if (!mydata.rank_all) //restore prediction
-    examples[0]->pred.multiclass = action;
-  else
-    swap(examples[0]->pred.multilabels, mydata.mtr_multilabels);
+  //  if (!mydata.rank_all) //restore prediction
+  //    examples[0]->pred.multiclass = action;
+  //  else
+    swap(examples[0]->pred.a_s, mydata.a_s);
 }
 
 bool test_adf_sequence(cb_adf& data)
@@ -321,7 +322,7 @@ bool test_adf_sequence(cb_adf& data)
 template <bool is_learn>
 void do_actual_learning(cb_adf& data, base_learner& base)
 { bool isTest = test_adf_sequence(data);
-  get_observed_cost(data, data.ec_seq);
+  data.known_cost = get_observed_cost(data.ec_seq);
 
   if (isTest || !is_learn)
   { gen_cs_example_ips(data.ec_seq, data.cs_labels);//create test labels.
@@ -362,14 +363,13 @@ void global_print_newline(vw& all)
 // how to
 
 void output_example(vw& all, cb_adf& c, example& ec, v_array<example*>* ec_seq)
-{ if (example_is_newline(ec)) return;
-  // the shared example
+{ if (example_is_newline_not_header(ec)) return;
 
   size_t num_features = 0;
 
   float loss = 0.;
 
-  uint32_t action = ec.pred.multiclass;
+  uint32_t action = ec.pred.a_s[0].action;
   for (size_t i = 0; i < (*ec_seq).size(); i++)
     if (!CB::ec_is_example_header(*(*ec_seq)[i]))
       num_features += (*ec_seq)[i]->num_features;
@@ -400,28 +400,31 @@ void output_example(vw& all, cb_adf& c, example& ec, v_array<example*>* ec_seq)
     all.print_text(all.raw_prediction, outputStringStream.str(), ec.tag);
   }
 
-  CB::print_update(all, is_test, ec, ec_seq, false);
+  CB::print_update(all, is_test, ec, ec_seq, true);
 }
 
 void output_rank_example(vw& all, cb_adf& c, example& head_ec, v_array<example*>* ec_seq)
 { label& ld = head_ec.l.cb;
   v_array<CB::cb_class> costs = ld.costs;
 
-  if (example_is_newline(head_ec)) return;
+  if (example_is_newline_not_header(head_ec)) return;
 
   size_t num_features = 0;
   for (size_t i = 0; i < (*ec_seq).size(); i++)
-    if (!CB::ec_is_example_header(*(*ec_seq)[i]))
+    if (!CB::ec_is_example_header(*(*ec_seq)[i])) {
       num_features += (*ec_seq)[i]->num_features;
+      //cout<<(*ec_seq)[i]->num_features<<" ";
+    }
+  //cout<<endl;
 
   all.sd->total_features += num_features;
 
   float loss = 0.;
-  v_array<uint32_t>& preds = head_ec.pred.multilabels.label_v;
+  action_scores& preds = head_ec.pred.a_s;
   bool is_test = false;
 
   if (c.known_cost.probability > 0)
-  { loss = get_unbiased_cost(&(c.known_cost), c.pred_scores, preds[0]);
+  { loss = get_unbiased_cost(&(c.known_cost), c.pred_scores, preds[0].action);
     all.sd->sum_loss += loss;
     all.sd->sum_loss_since_last_dump += loss;
   }
@@ -429,7 +432,7 @@ void output_rank_example(vw& all, cb_adf& c, example& head_ec, v_array<example*>
     is_test = true;
 
   for (int sink : all.final_prediction_sink)
-    MULTILABEL::print_multilabel(sink, head_ec.pred.multilabels, head_ec.tag);
+    print_action_score(sink, head_ec.pred.a_s, head_ec.tag);
 
   if (all.raw_prediction > 0)
   { string outputString;
@@ -497,7 +500,7 @@ void finish(cb_adf& data)
   for(size_t i = 0; i < data.mtr_cs_labels.size(); i++)
     data.mtr_cs_labels[i].costs.delete_v();
   data.mtr_cs_labels.delete_v();
-  data.mtr_multilabels.label_v.delete_v();
+  data.a_s.delete_v();
   data.pred_scores.costs.delete_v();
 }
 
@@ -508,7 +511,7 @@ void predict_or_learn(cb_adf& data, base_learner& base, example &ec)
   bool is_test_ec = CB::example_is_test(ec);
   bool need_to_break = VW::is_ring_example(*all, &ec) && (data.ec_seq.size() >= all->p->ring_size - 2);
 
-  if ((example_is_newline(ec) && is_test_ec) || need_to_break)
+  if ((example_is_newline_not_header(ec) && is_test_ec) || need_to_break)
   { data.ec_seq.push_back(&ec);
     do_actual_learning<is_learn>(data, base);
     // using flag to clear, because ec_seq is used in finish_example
@@ -572,9 +575,9 @@ base_learner* cb_adf_setup(vw& all)
 
   if (all.vm.count("rank_all"))
   { ld.rank_all = true;
-    all.delete_prediction = MULTILABEL::multilabel.delete_label;
     *all.file_options << " --rank_all";
   }
+  all.delete_prediction = ACTION_SCORE::delete_action_scores;
 
   if (all.vm.count("no_predict"))
     ld.predict = false;
@@ -583,12 +586,12 @@ base_learner* cb_adf_setup(vw& all)
 
   // Push necessary flags.
   if ( (count(all.args.begin(), all.args.end(), "--csoaa_ldf") == 0 && count(all.args.begin(), all.args.end(), "--wap_ldf") == 0)
-       || all.vm.count("rank_all"))
+       || all.vm.count("rank_all") || all.vm.count("csoaa_rank") == 0)
   { if (count(all.args.begin(), all.args.end(), "--csoaa_ldf") == 0)
       all.args.push_back("--csoaa_ldf");
     if (count(all.args.begin(), all.args.end(), "multiline") == 0)
       all.args.push_back("multiline");
-    if (ld.rank_all && count(all.args.begin(), all.args.end(), "--csoaa_rank") == 0)
+    if (count(all.args.begin(), all.args.end(), "--csoaa_rank") == 0)
       all.args.push_back("--csoaa_rank");
   }
 

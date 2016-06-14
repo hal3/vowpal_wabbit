@@ -25,6 +25,25 @@ namespace VW
         CATCHRETHROW
     }
 
+    VowpalWabbitScalar VowpalWabbitScalarConfidencePredictionFactory::Create(vw* vw, example* ex)
+    {
+#if _DEBUG
+      if (ex == nullptr)
+        throw gcnew ArgumentNullException("ex");
+#endif
+
+      try
+      {
+        VowpalWabbitScalar ret;
+
+        ret.Value = VW::get_prediction(ex);
+        ret.Confidence = ex->confidence;
+
+        return ret;
+      }
+      CATCHRETHROW
+    }
+
     cli::array<float>^ VowpalWabbitScalarsPredictionFactory::Create(vw* vw, example* ex)
     {
 #if _DEBUG
@@ -74,19 +93,36 @@ namespace VW
         }
         CATCHRETHROW
 
-            if (length > Int32::MaxValue)
-            {
-                throw gcnew ArgumentOutOfRangeException("Multi-label predictions too large");
-            }
+        if (length > Int32::MaxValue)
+            throw gcnew ArgumentOutOfRangeException("Multi-label predictions too large");
 
         auto values = gcnew cli::array<int>((int)length);
 
         if (length > 0)
-        {
             Marshal::Copy(IntPtr(labels), values, 0, (int)length);
-        }
 
         return values;
+    }
+
+    cli::array<ActionScore>^ VowpalWabbitActionScorePredictionFactory::Create(vw* vw, example* ex)
+    {
+#if _DEBUG
+      if (ex == nullptr)
+        throw gcnew ArgumentNullException("ex");
+#endif
+
+      auto length = ex->pred.a_s.size();
+      auto values = gcnew cli::array<ActionScore>(length);
+
+      auto index = 0;
+      for (auto& as : ex->pred.a_s)
+      {
+          values[index].Action = as.action;
+          values[index].Score = as.score;
+          index++;
+      }
+
+      return values;
     }
 
     cli::array<float>^ VowpalWabbitTopicPredictionFactory::Create(vw* vw, example* ex)

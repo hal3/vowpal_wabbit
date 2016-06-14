@@ -11,7 +11,7 @@ using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.Linq;
 using System.Text;
-using VW.Interfaces;
+using VW.Labels;
 using VW.Labels;
 using VW.Serializer;
 
@@ -94,7 +94,7 @@ namespace VW
 
             if (serializer == null)
             {
-                serializer = VowpalWabbitSerializerFactory.CreateSerializer<TExample>(new VowpalWabbitSettings(enableStringExampleGeneration: true)).Create(vw);
+                serializer = VowpalWabbitSerializerFactory.CreateSerializer<TExample>(new VowpalWabbitSettings { EnableStringExampleGeneration = true }).Create(vw);
             }
             else if (!serializer.EnableStringExampleGeneration)
             {
@@ -103,7 +103,7 @@ namespace VW
 
             if (actionDependentFeatureSerializer == null)
             {
-                actionDependentFeatureSerializer = VowpalWabbitSerializerFactory.CreateSerializer<TActionDependentFeature>(new VowpalWabbitSettings(enableStringExampleGeneration: true)).Create(vw);
+                actionDependentFeatureSerializer = VowpalWabbitSerializerFactory.CreateSerializer<TActionDependentFeature>(new VowpalWabbitSettings { EnableStringExampleGeneration = true }).Create(vw);
             }
             else if (!actionDependentFeatureSerializer.EnableStringExampleGeneration)
             {
@@ -412,7 +412,7 @@ namespace VW
                 return null;
             }
 
-            var values = firstExample.GetPrediction(vw, VowpalWabbitPredictionType.Multilabel);
+            var values = firstExample.GetPrediction(vw, VowpalWabbitPredictionType.ActionScore);
 
             if (values.Length != validActionDependentFeatures.Count)
             {
@@ -424,7 +424,7 @@ namespace VW
             int i = 0;
             foreach (var index in values)
             {
-                result[i++] = validActionDependentFeatures[index];
+                result[i++] = validActionDependentFeatures[(int)index.Action];
             }
 
             // append invalid ones at the end

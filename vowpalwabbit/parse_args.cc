@@ -33,6 +33,7 @@ license as described in the file LICENSE.
 #include "cb_algs.h"
 #include "cb_adf.h"
 #include "cb_explore.h"
+#include "cb_explore_adf.h"
 #include "mwt.h"
 #include "confidence.h"
 #include "scorer.h"
@@ -53,6 +54,7 @@ license as described in the file LICENSE.
 #include "lrqfa.h"
 #include "autolink.h"
 #include "log_multi.h"
+#include "recall_tree.h"
 #include "stagewise_poly.h"
 #include "active.h"
 #include "active_cover.h"
@@ -1073,6 +1075,7 @@ void parse_reductions(vw& all)
   all.reduction_stack.push_back(boosting_setup);
   all.reduction_stack.push_back(ect_setup);
   all.reduction_stack.push_back(log_multi_setup);
+  all.reduction_stack.push_back(recall_tree_setup);
   all.reduction_stack.push_back(multilabel_oaa_setup);
 
   all.reduction_stack.push_back(csoaa_setup);
@@ -1082,6 +1085,7 @@ void parse_reductions(vw& all)
   all.reduction_stack.push_back(cb_adf_setup);
   all.reduction_stack.push_back(mwt_setup);
   all.reduction_stack.push_back(cb_explore_setup);
+  all.reduction_stack.push_back(cb_explore_adf_setup);
   all.reduction_stack.push_back(cbify_setup);
 
   all.reduction_stack.push_back(ExpReplay::expreplay_setup<'c', COST_SENSITIVE::cs_label>);

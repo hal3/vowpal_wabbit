@@ -6,6 +6,7 @@
 // </copyright>
 // --------------------------------------------------------------------------------------------------------------------
 
+using System;
 namespace VW.Serializer
 {
     /// <summary>
@@ -16,41 +17,51 @@ namespace VW.Serializer
         public const string FeatureIgnorePrefixDefault = "_";
         public const string TextPropertyDefault = "_text";
         public const string LabelPropertyDefault = "_label";
+        public const string LabelIndexPropertyDefault = "_labelIndex";
+        public const string LabelPropertyPrefixDefault = "_label_";
         public const string MultiPropertyDefault = "_multi";
 
         public static readonly PropertyConfiguration Default = new PropertyConfiguration();
 
-        public PropertyConfiguration(
-            string featureIgnorePrefix = FeatureIgnorePrefixDefault,
-            string textProperty = TextPropertyDefault,
-            string labelProperty = LabelPropertyDefault,
-            string multiProperty = MultiPropertyDefault)
+        public PropertyConfiguration()
         {
-            this.FeatureIgnorePrefix = featureIgnorePrefix;
-            this.TextProperty = textProperty;
-            this.LabelProperty = labelProperty;
-            this.MultiProperty = multiProperty;
+            this.FeatureIgnorePrefix = FeatureIgnorePrefixDefault;
+            this.TextProperty = TextPropertyDefault;
+            this.LabelProperty = LabelPropertyDefault;
+            this.MultiProperty = MultiPropertyDefault;
+            this.LabelIndexProperty = LabelIndexPropertyDefault;
+            this.LabelPropertyPrefix = LabelPropertyPrefixDefault;
         }
 
         /// <summary>
         /// JSON properties starting with underscore are ignored.
         /// </summary>
-        public string FeatureIgnorePrefix { get; private set; }
+        public string FeatureIgnorePrefix { get; set; }
 
         /// <summary>
         /// JSON property "_text" is marshalled using <see cref="VW.Serializer.StringProcessing.Split"/>.
         /// </summary>
-        public string TextProperty { get; private set; }
+        public string TextProperty { get; set; }
 
         /// <summary>
         /// JSON property "_label" is used as label.
         /// </summary>
-        public string LabelProperty { get; private set; }
+        public string LabelProperty { get; set; }
+
+        /// <summary>
+        /// JSON property "_labelIndex" determines the index this label is applied for multi-line examples.
+        /// </summary>
+        public string LabelIndexProperty { get; set; }
+
+        /// <summary>
+        /// JSON properties starting with "_label_$name" are used to specify nested properties. Has the same effect as _label: { "$name": ... }.
+        /// </summary>
+        public string LabelPropertyPrefix { get; set; }
 
         /// <summary>
         /// JSON property "_multi" is used to signal multi-line examples.
         /// </summary>
-        public string MultiProperty { get; private set; }
+        public string MultiProperty { get; set; }
 
         /// <summary>
         /// True if <paramref name="property"/> is considered a special property and thus should not be skipped.
@@ -59,9 +70,11 @@ namespace VW.Serializer
         /// <returns>True if <paramref name="property"/> is a special property, false otherwise.</returns>
         public bool IsSpecialProperty(string property)
         {
-            return property == TextProperty ||
-                property == LabelProperty ||
-                property == MultiProperty;
+            return property.Equals(TextProperty, StringComparison.Ordinal) ||
+                property.Equals(LabelProperty, StringComparison.Ordinal) ||
+                property.Equals(MultiProperty, StringComparison.Ordinal) ||
+                property.Equals(LabelIndexProperty, StringComparison.Ordinal) ||
+                property.StartsWith(LabelPropertyPrefixDefault, StringComparison.Ordinal);
         }
     }
 }

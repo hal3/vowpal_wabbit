@@ -40,6 +40,26 @@ namespace VW
             virtual float Create(vw* vw, example* ex) sealed;
         };
 
+        public value struct VowpalWabbitScalar
+        {
+        public:
+            float Value;
+
+            float Confidence;
+        };
+
+        /// <summary>
+        /// A scalar prediction result.
+        /// </summary>
+        public ref class VowpalWabbitScalarConfidencePredictionFactory sealed : IVowpalWabbitPredictionFactory<VowpalWabbitScalar>
+        {
+        public:
+          /// <summary>
+          /// Extracts prediction results from example.
+          /// </summary>
+          virtual VowpalWabbitScalar Create(vw* vw, example* ex) sealed;
+        };
+
         /// <summary>
         /// A scalar prediction result.
         /// </summary>
@@ -76,6 +96,28 @@ namespace VW
             virtual cli::array<int>^ Create(vw* vw, example* ex) sealed;
         };
 
+        [System::Diagnostics::DebuggerDisplay("{Action}:{Score}")]
+        public value struct ActionScore sealed
+        {
+        public:
+          property uint32_t Action;
+
+          property float Score;
+        };
+
+        /// <summary>
+        /// A multi label prediction result.
+        /// </summary>
+        public ref class VowpalWabbitActionScorePredictionFactory sealed
+          : IVowpalWabbitPredictionFactory<cli::array<ActionScore>^>
+        {
+        public:
+          /// <summary>
+          /// Extracts multilabel prediction results from example.
+          /// </summary>
+          virtual cli::array<ActionScore>^ Create(vw* vw, example* ex) sealed;
+        };
+
         /// <summary>
         /// A topic prediction result.
         /// </summary>
@@ -99,6 +141,11 @@ namespace VW
             /// </summary>
             static initonly VowpalWabbitScalarPredictionFactory^ Scalar = gcnew VowpalWabbitScalarPredictionFactory;
 
+			      /// <summary>
+			      /// Use for scalar predictions.
+			      /// </summary>
+			      static initonly VowpalWabbitScalarConfidencePredictionFactory^ ScalarConfidence = gcnew VowpalWabbitScalarConfidencePredictionFactory;
+
             /// <summary>
             /// Use for scalar predictions.
             /// </summary>
@@ -113,6 +160,11 @@ namespace VW
             /// Use for multi label predictions.
             /// </summary>
             static initonly VowpalWabbitMultilabelPredictionFactory^ Multilabel = gcnew VowpalWabbitMultilabelPredictionFactory;
+
+            /// <summary>
+            /// Use for action score predictions.
+            /// </summary>
+            static initonly VowpalWabbitActionScorePredictionFactory^ ActionScore = gcnew VowpalWabbitActionScorePredictionFactory;
 
             /// <summary>
             /// Use for LDA topic predictions.

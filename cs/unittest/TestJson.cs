@@ -89,9 +89,9 @@ namespace cs_unittest
         {
             using (var validator = new VowpalWabbitExampleJsonValidator("--cb 2 --cb_type dr"))
             {
-                validator.Validate("1:-2:.3 |a foo:1",
-                    "{\"_label\":{\"Action\":1,\"Cost\":-2,\"Probability\":.3},\"a\":{\"foo\":1}}",
-                    VowpalWabbitLabelComparator.ContextualBandit);
+                //validator.Validate("1:-2:.3 |a foo:1",
+                //    "{\"_label\":{\"Action\":1,\"Cost\":-2,\"Probability\":.3},\"a\":{\"foo\":1}}",
+                //    VowpalWabbitLabelComparator.ContextualBandit);
                 validator.Validate("1:2:.5 |a foo:1", "{\"_label\":\"1:2:.5\",\"a\":{\"foo\":1}}", VowpalWabbitLabelComparator.ContextualBandit);
             }
         }
@@ -151,13 +151,17 @@ namespace cs_unittest
             }
 
             using (var validator = new VowpalWabbitExampleJsonValidator(
-                new VowpalWabbitSettings(
-                    "--cb 2 --cb_type dr",
-                    propertyConfiguration: new PropertyConfiguration(
-                        multiProperty: "adf",
-                        textProperty: "someText",
-                        labelProperty: "theLabel",
-                        featureIgnorePrefix: "xxx"))))
+                new VowpalWabbitSettings
+                {
+                    Arguments = "--cb 2 --cb_type dr",
+                    PropertyConfiguration = new PropertyConfiguration
+                    {
+                        MultiProperty = "adf",
+                        TextProperty = "someText",
+                        LabelProperty = "theLabel",
+                        FeatureIgnorePrefix = "xxx"
+                    }
+                }))
             {
                 validator.Validate(new[] {
                      "shared | Age:25",
@@ -199,6 +203,36 @@ namespace cs_unittest
             }
         }
 
+        [TestMethod]
+        [TestCategory("JSON")]
+        public void TestJsonLabel()
+        {
+            using (var validator = new VowpalWabbitExampleJsonValidator(""))
+            {
+                validator.Validate("1 | a:2 ", "{\"a\":2,\"_label_Label\":1}");
+            }
+
+            using (var validator = new VowpalWabbitExampleJsonValidator(new VowpalWabbitSettings
+                {
+                    Arguments = "--cb_adf",
+                    PropertyConfiguration = new PropertyConfiguration
+                    {
+                        MultiProperty = "adf",
+                        TextProperty = "someText",
+                        FeatureIgnorePrefix = "xxx"
+                    }
+                }))
+            {
+                validator.Validate(new[] {
+                     "shared | Age:25",
+                     " | w1 w2 |a x:1",
+                     "0:-1:.3 | w2 w3"
+                    },
+                    "{\"Age\":25,\"adf\":[{\"someText\":\"w1 w2\", \"a\":{\"x\":1}, \"xxxxIgnoreMe\":2}, {\"someText\":\"w2 w3\"}], \"_labelIndex\":1, \"_label_Cost\":-1, \"_label_Probability\":0.3}",
+                    VowpalWabbitLabelComparator.ContextualBandit);
+            }
+        }
+
         public class MyContext
         {
             [Feature]
@@ -217,7 +251,7 @@ namespace cs_unittest
         [TestMethod]
         public void TestNumADFs()
         {
-            var jsonDirectSerializer = VowpalWabbitSerializerFactory.CreateSerializer<MyContext>(new VowpalWabbitSettings(featureDiscovery: VowpalWabbitFeatureDiscovery.Json))
+            var jsonDirectSerializer = VowpalWabbitSerializerFactory.CreateSerializer<MyContext>(new VowpalWabbitSettings { TypeInspector = JsonTypeInspector.Default })
                 as IVowpalWabbitMultiExampleSerializerCompiler<MyContext>;
 
             Assert.IsNotNull(jsonDirectSerializer);
