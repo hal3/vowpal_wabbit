@@ -199,6 +199,7 @@ struct search_private
   bool force_oracle;             // insist on using the oracle to make predictions
   bool debug_oracle;             // debug the oracle
   float perturb_oracle;          // with this probability, choose a random action instead of oracle action
+  float perturb_learn;           // with this probability, choose a random action instead of oracle action
   bool wide_output_format;
   
   // if we're printing to stderr we need to remember if we've printed the header yet
@@ -1603,6 +1604,14 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
           for (size_t n=start_K; n<ec_cnt; n++)
             add_example_conditioning(priv, ecs[n], condition_on_cnt, condition_on_names, priv.condition_on_actions.begin());
 
+        if ((priv.perturb_learn > 0.) && (frand48() < priv.perturb_learn))
+        { skip = true;
+          uint32_t A = (max_action_allowed == 0) ? priv.A : max_action_allowed;
+          a = (allowed_actions_cnt > 0) ? allowed_actions[random(allowed_actions_cnt)] :
+              priv.is_ldf ? (action)random(ec_cnt) :
+              (action)(1 + random(A));
+        }
+        
         if (((!skip) && (policy >= 0)) || need_fea)    // only make a prediction if we're going to use the output
         { if (priv.auto_condition_features && priv.acset.use_passthrough_repr)
           { if (priv.is_ldf)  { std::cerr << "search cannot use state representations in ldf mode" << endl; throw exception(); }
@@ -2558,6 +2567,7 @@ base_learner* setup(vw&all)
   ("search_no_caching",                             "turn off the built-in caching ability (makes things slower, but technically more safe)")
   ("search_xv",                                     "train two separate policies, alternating prediction/learning")
   ("search_perturb_oracle",    po::value<float>(),  "perturb the oracle on rollin with this probability (def: 0)")
+      ("search_perturb_learn", po::value<float>(),  "perturb the learned policy on rollin/rollout (even during test!) with this probability (def: 0)")
   ("search_linear_ordering",                        "insist on generating examples in linear order (def: hoopla permutation)")
   ("search_only_task",         po::value<size_t>(), "only learn this specific task (def: 0 = learn all tasks)")
   ("search_override_hook",                          "in library mode, you might want to override the (eg loaded) task with a hook; this allows that to happen")
@@ -2607,6 +2617,7 @@ base_learner* setup(vw&all)
   if (vm.count("search_passes_per_policy"))       priv.passes_per_policy    = vm["search_passes_per_policy"].as<size_t>();
   if (vm.count("search_xv"))                      priv.xv       = true;
   if (vm.count("search_perturb_oracle"))          priv.perturb_oracle       = vm["search_perturb_oracle"].as<float>();
+  if (vm.count("search_perturb_learn"))           priv.perturb_learn        = vm["search_perturb_learn"].as<float>();
   if (vm.count("search_linear_ordering"))         priv.linear_ordering      = true;
   if (vm.count("search_only_task"))               priv.only_do_task         = vm["search_only_task"].as<size_t>();
 

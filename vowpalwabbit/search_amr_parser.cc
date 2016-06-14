@@ -26,6 +26,7 @@ struct gold_head_T
   v_array<uint32_t> count;   // count[i] == # of times i appears in items, for efficiency
   gold_head_T() { items = v_init<uint32_t>(); count = v_init<uint32_t>(); }
   void delete_v() { items.delete_v(); count.delete_v(); }
+  void erase() { items.erase(); count.erase(); }
   inline uint32_t*& begin() { return items.begin(); }
   inline uint32_t*& end() { return items.end(); }
   inline bool contains(uint32_t x) { return (x < count.size()) && (count[x] > 0); }
@@ -436,6 +437,8 @@ size_t transition_hybrid(Search::search& sch, uint64_t a_id, uint32_t idx, uint3
   THROW("transition_hybrid failed on a_id=" << a_id);
 }
 
+#define EC(i) ec[data->reverse_sentence ? n-(i)-1 : i]
+  
 void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
 { vw& all = sch.get_vw_pointer_unsafe();
   task_data *data = sch.get_task_data<task_data>();
@@ -456,21 +459,22 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
 
   // feature based on the top three examples in stack ec_buf[0]: s1, ec_buf[1]: s2, ec_buf[2]: s3
   for(size_t i=0; i<3; i++)
-    ec_buf[i] = (stack.size()>i && *(stack.end()-(i+1))!=0) ? ec[*(stack.end()-(i+1))-1] : 0;
+    ec_buf[i] = (stack.size()>i && *(stack.end()-(i+1))!=0) ? EC(*(stack.end()-(i+1))-1) : 0;
 
   // features based on examples in string buffer ec_buf[3]: b1, ec_buf[4]: b2, ec_buf[5]: b3
   for(size_t i=3; i<6; i++)
-    ec_buf[i] = (idx+(i-3)-1 < n) ? ec[idx+i-3-1] : 0;
+  { ec_buf[i] = (idx+(i-3)-1 < n) ? EC(idx+i-3-1) : 0;
+  }
 
   // features based on the leftmost and the rightmost children of the top element stack ec_buf[6]: sl1, ec_buf[7]: sl2, ec_buf[8]: sr1, ec_buf[9]: sr2;
   for(size_t i=6; i<10; i++)
     if (!empty && last != 0&& children[i-4][last]!=0)
-      ec_buf[i] = ec[children[i-4][last]-1];
+      ec_buf[i] = EC(children[i-4][last]-1);
 
   // features based on leftmost children of the top element in bufer ec_buf[10]: bl1, ec_buf[11]: bl2
   for(size_t i=10; i<12; i++)
-    ec_buf[i] = (idx <=n && children[i-8][idx]!=0) ? ec[children[i-8][idx]-1] : 0;
-  ec_buf[12] = (stack.size()>1 && *(stack.end()-2)!=0 && children[2][*(stack.end()-2)]!=0) ? ec[children[2][*(stack.end()-2)]-1] : 0;
+    ec_buf[i] = (idx <=n && children[i-8][idx]!=0) ? EC(children[i-8][idx]-1) : 0;
+  ec_buf[12] = (stack.size()>1 && *(stack.end()-2)!=0 && children[2][*(stack.end()-2)]!=0) ? EC(children[2][*(stack.end()-2)]-1) : 0;
 
   // unigram features
   for(size_t i=0; i<13; i++)
@@ -731,24 +735,30 @@ void get_word_possible_concepts(task_data& data, v_array<pair<action,float>>& po
     possible_concepts.push_back(make_pair(NULL_CONCEPT,1e-6));
 }
 
-void reverse_sentence(v_array<uint32_t>&concepts, v_array<v_array<uint32_t>>& tags, v_array<gold_head_T>&heads, uint32_t n)
-{ for (size_t i=0; i<n/2; i++)
-  {
-    size_t j = n-i-1;
+template<class T, T(*init)()>
+void reverse_sentence(v_array<uint32_t>&concepts, v_array<v_array<uint32_t>>& tags, v_array<T>&heads, uint32_t n)
+{ for (size_t _i=0; _i<n/2; _i++)
+  { size_t i = _i+1;
+    size_t j = n-_i;
     uint32_t tmp_c = concepts[i]; concepts[i] = concepts[j]; concepts[j] = tmp_c;
     v_array<uint32_t> tmp_t = tags[i]; tags[i] = tags[j]; tags[j] = tmp_t;
-    gold_head_T tmp_h = heads[i]; heads[i] = heads[j]; heads[j] = tmp_h;
+    T tmp_h = heads[i]; heads[i] = heads[j]; heads[j] = tmp_h;
   }
-  for (size_t i=0; i<n; i++)
-  {
-    gold_head_T& old_h = heads[i];
-    gold_head_T new_h;
-    for (uint32_t j : old_h)
-      new_h.push_back(n-j+1);
-    heads[i] = new_h;
-    old_h.delete_v();
+  T tmp = init();
+  for (size_t i=1; i<=n; i++)
+  { for (uint32_t j : heads[i])
+    { uint32_t k = (j == 0) ? 0 : n-j+1;
+      tmp.push_back(k);
+    }
+    heads[i].erase();
+    for (uint32_t j : tmp)
+      heads[i].push_back(j);
+    tmp.erase();
   }
+  tmp.delete_v();
 }
+
+gold_head_T init_gold_head_T() { return gold_head_T(); }
   
 void setup(Search::search& sch, vector<example*>& ec)
 { task_data *data = sch.get_task_data<task_data>();
@@ -763,8 +773,8 @@ void setup(Search::search& sch, vector<example*>& ec)
 
   for (size_t i=0; i<n; i++)
     get_word_possible_concepts(*data,
-                               data->possible_concepts[data->reverse_sentence ? n-i-1 : i],
-                               ec[i]->tag);
+                               data->possible_concepts[i],
+                               EC(i)->tag);
 
   for (auto*x = data->heads.begin(); x != data->heads.end_array; ++x) x->delete_v();
   for (auto*x = data->tags.begin(); x != data->tags.end_array; ++x) x->delete_v();
@@ -826,16 +836,19 @@ void setup(Search::search& sch, vector<example*>& ec)
   for(size_t i=0; i<6; i++)
     data->children[i].resize(n+(size_t)1);
   if (data->reverse_sentence)
-    reverse_sentence(gold_concepts, gold_tags, gold_heads, n);
+    reverse_sentence<gold_head_T, init_gold_head_T>(gold_concepts, gold_tags, gold_heads, n);
 }
 
 float smatch_loss(Search::search& sch, uint64_t n)
 {
-
   task_data *data = sch.get_task_data<task_data>();
   v_array<uint32_t> &gold_concepts=data->gold_concepts, &concepts=data->concepts;
   v_array<v_array<uint32_t>> &heads=data->heads, &gold_tags=data->gold_tags, &tags = data->tags;
   v_array<gold_head_T>& gold_heads = data->gold_heads;
+
+  //if (data->reverse_sentence)
+  //  reverse_sentence<v_array<uint32_t>, v_init<uint32_t>>(concepts, tags, heads, n);
+  
   float correct = 0,pred = 0,gold = 0;
   // First, we calculate score of concepts - we don't care about root
   for (size_t i=1;i<=n;i++) {
@@ -848,6 +861,19 @@ float smatch_loss(Search::search& sch, uint64_t n)
         correct += 1;
   }
 
+  /*
+  heads.end() = heads.begin() + n+1;
+  concepts.end() = concepts.begin() + n+1;
+  tags.end() = tags.begin() + n+1;
+
+  cerr << "gold_heads = " << gold_heads << endl;
+  cerr << "     heads = " <<      heads << endl;
+  cerr << "gold_tags = " << gold_tags << endl;
+  cerr << "     tags = " <<      tags << endl;
+  cerr << "gold_concepts = " << gold_concepts << endl;
+  cerr << "     concepts = " <<      concepts << endl;
+  */
+  
   cdbg << "Gold " << gold << endl;
   cdbg << "Pred  " << pred << endl;
   cdbg << "Correct " << correct << endl;
@@ -915,6 +941,14 @@ void run(Search::search& sch, vector<example*>& ec)
   LabelDict::free_label_features(data->concept_to_features);
   concept_to_features.clear(); // erase current set of concepts
   uint64_t n = (uint64_t) ec.size();
+
+  if (data->reverse_sentence)
+    for (size_t i=0; i<n/2; i++)
+    { example* tmp = ec[i];
+      ec[i] = ec[n-i-1];
+      ec[n-i-1] = tmp;
+    }
+  
   if (n >= MAX_SENT_LEN)
     THROW("sentence too long, length=" << n << ", but MAX_SENT_LEN=" << MAX_SENT_LEN);
   //cdbg << "n " << n << endl;
@@ -1262,6 +1296,14 @@ void run(Search::search& sch, vector<example*>& ec)
     }
     cdbg << "output = " << endl << sch.output().str() << endl;
   }
+
+
+  if (data->reverse_sentence)
+    for (size_t i=0; i<n/2; i++)
+    { example* tmp = ec[i];
+      ec[i] = ec[n-i-1];
+      ec[n-i-1] = tmp;
+    }
   
   valid_tags.delete_v();
   gold_ids.delete_v();
