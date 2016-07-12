@@ -76,7 +76,7 @@ namespace CB_EXPLORE_ADF{
     if (shared)
       num_actions--;
     if (preds.size() != num_actions)
-      cerr << "Received predictions of wrong size from CB base learner\n";
+      THROW("Received predictions of wrong size from CB base learner");
 
     if (!is_learn || !data.learn_only) {
       if (data.tau) {
@@ -121,8 +121,8 @@ namespace CB_EXPLORE_ADF{
     size_t num_actions = examples.size() - 1;
     if (shared)
       num_actions--;
-    if(preds.size() != num_actions)
-      cerr<<"Received predictions of wrong size from CB base learner "<<preds.size()<<" "<<num_actions<<endl;
+    if (preds.size() != num_actions)
+      THROW("Received predictions of wrong size from CB base learner");
 
     if(!is_learn || !data.learn_only) {
       float prob = data.epsilon/(float)num_actions;
@@ -158,7 +158,7 @@ namespace CB_EXPLORE_ADF{
     if (shared)
       num_actions--;
     if (preds.size() != num_actions)
-      cerr << "Received predictions of wrong size from CB base learner\n";
+      THROW("Received predictions of wrong size from CB base learner");
 
     if (!is_learn || !data.learn_only) {
       for (size_t i = 0; i < num_actions; i++) {
@@ -206,7 +206,7 @@ namespace CB_EXPLORE_ADF{
     if (shared)
       num_actions--;
     if (preds.size() != num_actions)
-      cerr << "Received predictions of wrong size from CB base learner\n";
+      THROW("Received predictions of wrong size from CB base learner");
     float norm = 0.;
     float max_score = preds[0].score;
 
@@ -442,7 +442,8 @@ base_learner* cb_explore_adf_setup(vw& all)
     ("first", po::value<size_t>(), "tau-first exploration")
     ("epsilon", po::value<float>(), "epsilon-greedy exploration")
     ("bag", po::value<size_t>(), "bagging-based exploration")
-    ("softmax", po::value<float>(), "softmax exploration")
+    ("softmax", "softmax exploration")
+    ("lambda", po::value<float>(), "parameter for softmax")
     ("learn_only", "for not calling predict when learn is true");
   add_options(all);
 
@@ -483,7 +484,7 @@ base_learner* cb_explore_adf_setup(vw& all)
   {
     data.lambda = 1.0;
     if (vm.count("lambda"))
-      data.lambda = (float)vm["lambda"].as<size_t>();
+      data.lambda = (float)vm["lambda"].as<float>();
     data.explore_type = SOFTMAX;
     sprintf(type_string, "%f", data.lambda);
     *all.file_options << " --softmax --lambda "<<type_string;
