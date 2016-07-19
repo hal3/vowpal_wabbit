@@ -37,7 +37,7 @@ void add_example_namespace(example& ec, char ns, features& fs)
   features& add_fs = ec.feature_space[(size_t)ns];
  for (size_t i = 0; i < fs.size(); ++i)
     {
-      add_fs.push_back(fs.values[i], fs.indicies[i]);
+      add_fs.push_back(fs.values[i], fs.indicies[i] * 349017);
       if (audit)
         add_fs.space_names.push_back(fs.space_names[i]);
     }
@@ -46,19 +46,21 @@ void add_example_namespace(example& ec, char ns, features& fs)
   ec.num_features += fs.size();
 }
 
-void add_example_namespaces_from_example(example& target, example& source)
+void add_example_namespaces_from_example(example& target, example& source, char target_namespace)
 { for (namespace_index idx : source.indices)
   { if (idx == constant_namespace) continue;
-    add_example_namespace(target, (char)idx, source.feature_space[idx]);
+    char tgt_ns = (target_namespace == 0) ? (char)idx : target_namespace;
+    add_example_namespace(target, tgt_ns, source.feature_space[idx]);
   }
 }
 
-void del_example_namespaces_from_example(example& target, example& source)
+void del_example_namespaces_from_example(example& target, example& source, char target_namespace)
 { namespace_index* idx = source.indices.end();
   idx--;
   for (; idx>=source.indices.begin(); idx--)
     { if (*idx == constant_namespace) continue;
-      del_example_namespace(target, (char)*idx, source.feature_space[*idx]);
+      char tgt_ns = (target_namespace == 0) ? (char)*idx : target_namespace;
+      del_example_namespace(target, tgt_ns, source.feature_space[*idx]);
     }
 }
 

@@ -108,6 +108,8 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
   if (vm.count("search_graph_separate_learners")) D->separate_learners = true;
   if (vm.count("search_graph_directed"))       D->directed = true;
 
+  cerr << "num_loops = " << D->num_loops << endl;
+  
   if (D->num_loops <= 1) { D->num_loops = 1; D->separate_learners = false; }
 
   D->K = num_actions;

@@ -18,6 +18,7 @@ license as described in the file LICENSE.
 #include "search_hooktask.h"
 #include "search_graph.h"
 #include "search_test_ldfnonldf.h"
+#include "search_generate.h"
 #include "search_meta.h"
 #include "csoaa.h"
 #include "active.h"
@@ -48,6 +49,7 @@ search_task* all_tasks[] =
   &EntityRelationTask::task,
   &HookTask::task,
   &GraphTask::task,
+  &GenerateTask::task,
   &TestLDFNonLDFTask::task,
   nullptr
 };   // must nullptr terminate!
@@ -670,7 +672,11 @@ void search_declare_loss(search_private& priv, float loss)
 template<class T> void cdbg_print_array(string str, v_array<T>& A) { cdbg << str << " = ["; for (size_t i=0; i<A.size(); i++) cdbg << " " << A[i]; cdbg << " ]" << endl; }
 
 
-size_t random(size_t max) { return (size_t)(frand48() * (float)max); }
+size_t random(size_t mx) {
+  float r = frand48();
+  size_t ret = (size_t)(r * (float)mx);
+  return ret;
+}
 template<class T> bool array_contains(T target, const T*A, size_t n)
 { if (A == nullptr) return false;
   for (size_t i=0; i<n; i++)
@@ -967,6 +973,7 @@ action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* o
         (allowed_actions_cnt > 0) ? allowed_actions[random(allowed_actions_cnt)] :
         priv.is_ldf ? (action)random(ec_cnt) :
         (action)(1 + random(A));
+    //cerr << "a set to " << a << ", oracle_actions_cnt=" << oracle_actions_cnt << ", allowed_actions_cnt=" << allowed_actions_cnt << ", is_ldf=" << priv.is_ldf << ", ec_cnt=" << ec_cnt << endl;
   }
   cdbg << "choose_oracle_action from oracle_actions = ["; for (size_t i=0; i<oracle_actions_cnt; i++) cdbg << " " << oracle_actions[i]; cdbg << " ], ret=" << a << endl;
   if (need_memo_foreach_action(priv) && (priv.state == INIT_TRAIN))
@@ -3372,6 +3379,7 @@ action predictor::predict()
       ec[i].skip_reduction_layer = skip_reduction_layer;
   if (max_allowed > 0) assert(alA == nullptr);
   if (max_allowed > 0) assert(! is_ldf);
+  sch.priv->is_ldf = is_ldf;
   action p = is_ldf
              ? sch.predictLDF(ec, ec_cnt, my_tag, orA, oracle_actions.size(), cOn, cNa, learner_id, weight)
              : sch.predict(*ec, my_tag, orA, oracle_actions.size(), cOn, cNa, alA, numAlA, alAcosts, learner_id, weight, max_allowed);
