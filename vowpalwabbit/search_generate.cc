@@ -195,12 +195,17 @@ vector<string>* read_english_dictionary(string fname)
   
 void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
 { 
-  //  new_options(all, "Search Generator Options")
-  //  add_options(all);
   vw& vw_obj = S.get_vw_pointer_unsafe();
+  new_options(vw_obj, "Search Generator Options")
+      ("generate_output_dictionary", po::value<string>(), "dictionary that maps output ids to output words");
+  add_options(vw_obj);
+
   gen_data& G = *new gen_data(num_actions);
+  
   G.en_dict = nullptr;
-  G.en_dict = read_english_dictionary("ted.dict");
+  if (vm.count("generate_output_dictionary") > 0)
+    G.en_dict = read_english_dictionary(vm["generate_output_dictionary"].as<string>());
+  
   if ((vw_obj.namespace_dictionaries['e'].size() > 0) && (G.en_dict != nullptr))
   { for (size_t i=0; i<G.en_dict->size(); ++i)
     { string& en = (*G.en_dict)[i];
