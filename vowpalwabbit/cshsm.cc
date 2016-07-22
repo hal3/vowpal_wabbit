@@ -22,9 +22,11 @@ struct cshsm
 { uint32_t K;
   uint32_t root;   // top layer branching factor
   uint32_t leaf;   // max bottom layer branching factor
-  polyprediction* pred;
+  polyprediction* pred_root, * pred_leaf;
   bool classificationesque;
   float initial;
+  set<uint32_t> update_bottom;
+  v_array<float> top_costs;
 };
 
 /***
@@ -61,54 +63,60 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
   //  uint32_t trueL = ld.label - 1;
   //  uint32_t true0 = trueL / hsm.leaf;
 
-  base.multipredict(ec, 0, hsm.root, hsm.pred, false);
+  base.multipredict(ec, 0, hsm.root, hsm.pred_root, false);
   //cerr << "hsm.predR ="; for (size_t i=0; i<hsm.root; i++) cerr << ' ' << hsm.pred[i].scalar; //cerr << endl;
   uint32_t pred0 = 0;
   for (uint32_t i=1; i<hsm.root; i++)
-    if (hsm.pred[i].scalar < hsm.pred[pred0].scalar)
+    if (hsm.pred_root[i].scalar < hsm.pred_root[pred0].scalar)
       pred0 = i;
 
   uint32_t top = hsm.leaf; // min(hsm.leaf, hsm.k - hsm.leaf * pred0 + 1);
   
-  base.multipredict(ec, hsm.root + hsm.leaf * pred0, top, hsm.pred, false);
+  base.multipredict(ec, hsm.root + hsm.leaf * pred0, top, hsm.pred_leaf, false);
   uint32_t pred1 = 0;
   //cerr << "hsm.pred" << pred0 << " ="; for (size_t i=0; i<top; i++) cerr << ' ' << hsm.pred[i].scalar; cerr << endl;
   for (uint32_t i=1; i<top; i++)
-    if (hsm.pred[i].scalar < hsm.pred[pred1].scalar)
+    if (hsm.pred_leaf[i].scalar < hsm.pred_leaf[pred1].scalar)
       pred1 = i;
 
   if (is_learn) {
     // at the bottom level, we update (all minima) \cup (current prediction)
-    set<uint32_t> update_bottom; // which ids
-    v_array<float> top_costs = v_init<float>();
+    hsm.update_bottom.clear();  // which ids
     for (size_t i=0; i<hsm.root; i++)
-      top_costs.push_back(FLT_MAX);
+      hsm.top_costs[i] = FLT_MAX;
 
-    update_bottom.insert(pred0);
+    hsm.update_bottom.insert(pred0);
     for (CS::wclass& wc : ld.costs)
     { size_t j = (wc.class_index-1) / hsm.leaf;
       if (wc.x <= 0.)
-        update_bottom.insert(j);
-      if (wc.x < top_costs[j])
-        top_costs[j] = wc.x;
+        hsm.update_bottom.insert(j);
+      if (wc.x < hsm.top_costs[j])
+        hsm.top_costs[j] = wc.x;
     }
-    //cerr << "update_bottom = "; for (auto x : update_bottom) cerr << x << ' '; cerr << endl;
-    //cerr << "top_costs     = "; for (auto x : top_costs) cerr << x << ' '; cerr << endl;
+    //cerr << "hsm.update_bottom = "; for (auto x : hsm.update_bottom) cerr << x << ' '; cerr << endl;
+    //cerr << "hsm.top_costs     = "; for (auto x : hsm.top_costs) cerr << x << ' '; cerr << endl;
 
     ec.l.simple = { 0.f, 1.f, 0.f };
     for (size_t i=0; i<hsm.root; i++)
-      if (top_costs[i] < FLT_MAX)
-      { ec.l.simple.label = top_costs[i] * 2. - 1.;
+      if (hsm.top_costs[i] < FLT_MAX)
+      { ec.l.simple.label = hsm.top_costs[i] * 2. - 1.;
+        ec.partial_prediction = hsm.pred_root[i].scalar;
+        ec.pred.scalar = ec.partial_prediction;
         //cerr << "learn0(" << i << ")" << endl;
-        base.learn(ec, i);
+        base.update(ec, i);
       }
 
     for (CS::wclass& wc : ld.costs)
     { size_t j = (wc.class_index-1) / hsm.leaf;
-      if (update_bottom.find(j) != update_bottom.end())
+      if (hsm.update_bottom.find(j) != hsm.update_bottom.end())
       { ec.l.simple.label = wc.x * 2. - 1.;
         //cerr << "learn1(" << hsm.root + wc.class_index - 1 << ")" << endl;
-        base.learn(ec, hsm.root + wc.class_index - 1);
+        if (j == pred0)
+        { ec.partial_prediction = hsm.pred_leaf[(wc.class_index-1) % hsm.leaf].scalar;
+          ec.pred.scalar = ec.partial_prediction;
+          base.update(ec, hsm.root + wc.class_index - 1);
+        } else
+          base.learn(ec, hsm.root + wc.class_index - 1);
       }
     }
     
@@ -150,7 +158,9 @@ void finish_example(vw& all, cshsm&, example& ec)
 }
 
 void finish(cshsm& c)
-{ free(c.pred);
+{ free(c.pred_root);
+  free(c.pred_leaf);
+  c.top_costs.delete_v();
 }
 
 
@@ -170,9 +180,15 @@ base_learner* cshsm_setup(vw& all)
 
   c.leaf = (uint32_t)ceilf((float)c.K / (float)c.root);
   
-  c.pred = calloc_or_throw<polyprediction>(max(c.root, c.leaf));
+  //c.pred = calloc_or_throw<polyprediction>(max(c.root, c.leaf));
+  c.pred_root = calloc_or_throw<polyprediction>(c.root);
+  c.pred_leaf = calloc_or_throw<polyprediction>(c.leaf);
   c.classificationesque = all.vm.count("classificationesque") > 0;
 
+  c.top_costs = v_init<float>();
+  for (size_t i=0; i<c.root; i++)
+    c.top_costs.push_back(FLT_MAX);
+  
   learner<cshsm>& l = init_learner(&c,
                                    setup_base(all),
                                    predict_or_learn<true>,
