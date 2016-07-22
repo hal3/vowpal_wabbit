@@ -144,7 +144,7 @@ private:
 struct gen_data
 { action K;   // number of output words
   float max_length_ratio;  // max # output = max_length_ratio * # input, default 2
-  action eos;  // eos id, default 1
+  action eos, oov;  // eos id, default 1; oov default 2
   IncrementalEditDistance* ied; // at training time, for oracle
   vector<size_t> align_out_to_in; // at training time, if alignments are available, align_out_to_in[m] for m in output gives n in input such that n <-> m, or n=0 if none
   size_t max_output_length;
@@ -154,18 +154,21 @@ struct gen_data
   vector<string>* en_dict;
   v_array< pair<action,float> >* costs;
   bool action_costs;
+  bool remove_oov;
   Search::predictor* P; // cached predictor for speed
 
   gen_data(size_t _K) :
       K(_K),
       max_length_ratio(1.5),
       eos(1),
+      oov(2),
       ied(nullptr),
       max_output_length(40),
       oracle_alignment(true),
       oracle_translation(false),
       costs(nullptr),
       action_costs(false),
+      remove_oov(true),
       P(nullptr)
   {}
 };
@@ -194,7 +197,7 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
 
   gen_data& G = *new gen_data(num_actions);
   G.en_dict = nullptr;
-  //G.en_dict = read_english_dictionary("ted.dict");
+  G.en_dict = read_english_dictionary("ted.dict");
 
   if (G.action_costs)
   { G.costs  = new v_array< pair<action,float> >();
@@ -251,7 +254,8 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   vector<action> target;
   bool has_costs = true;
   for (CS::wclass& wc : lab)
-  { target.push_back(wc.class_index);
+  { if (wc.class_index != G.oov)
+      target.push_back(wc.class_index);
     if ((wc.x < 0.) || (wc.x >= N))
       has_costs = false;
   }
@@ -260,7 +264,8 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   G.ied = new IncrementalEditDistance(target, G.eos, false);
   if (has_costs)
     for (CS::wclass& wc : lab)
-      G.align_out_to_in.push_back((size_t) wc.x);
+      if (wc.class_index != G.oov)
+        G.align_out_to_in.push_back((size_t) wc.x);
 }
 
 
