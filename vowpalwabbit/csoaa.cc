@@ -12,6 +12,7 @@ license as described in the file LICENSE.
 #include "vw.h"
 #include "gd.h" // GD::foreach_feature() needed in subtract_example()
 #include "vw_exception.h"
+#include "rand48.h"
 
 using namespace std;
 using namespace LEARNER;
@@ -27,7 +28,7 @@ struct csoaa
 template<bool is_learn>
 inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
                        uint32_t& prediction, float& score, float& partial_prediction,
-                       bool classificationesque, polyprediction* pred, uint32_t num_classes, float max_cost)
+                       bool classificationesque, polyprediction* pred, uint32_t num_classes, float max_cost) //, float max_pred_zero_cost=FLT_MAX)
 { if (is_learn)
   { if (! classificationesque)
     { ec.l.simple.label = cost;
@@ -42,7 +43,8 @@ inline void inner_loop(base_learner& base, example& ec, uint32_t i, float cost,
     else {
       ec.partial_prediction = pred[i-1].scalar;
       ec.pred.scalar = ec.partial_prediction;
-      base.update(ec, i-1);
+      //if (true || (pred[i-1].scalar <= max_pred_zero_cost) || (cost <= 0.))
+        base.update(ec, i-1);
     }
   }
   else
@@ -98,8 +100,15 @@ void predict_or_learn(csoaa& c, base_learner& base, example& ec)
     //float sum_cost = 0.;
     //float num_zero = 0.;
     for (auto& cl : ld.costs) max_cost = max(max_cost, cl.x); // sum_cost += cl.x; if (cl.x <= 0.) num_zero += 1.; }
+    /*float max_cost = 0.f, max_pred_zero_cost = -FLT_MAX;
     for (auto& cl : ld.costs)
-      inner_loop<is_learn>(base, ec, cl.class_index, cl.x, prediction, score, cl.partial_prediction, c.classificationesque, predicted ? c.pred : nullptr, c.num_classes, max_cost);
+    { max_cost = max(max_cost, cl.x);
+      if ((cl.x <= 0.) && (c.pred[cl.class_index-1].scalar > max_pred_zero_cost))
+        c.pred[cl.class_index-1].scalar = max_pred_zero_cost;
+        }*/
+    
+    for (auto& cl : ld.costs)
+      inner_loop<is_learn>(base, ec, cl.class_index, cl.x, prediction, score, cl.partial_prediction, c.classificationesque, predicted ? c.pred : nullptr, c.num_classes, max_cost); //, max_pred_zero_cost);
     ec.partial_prediction = score;
   }
   else if (DO_MULTIPREDICT && !is_learn)

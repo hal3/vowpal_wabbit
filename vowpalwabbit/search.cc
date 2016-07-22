@@ -30,6 +30,9 @@ using namespace std;
 namespace CS = COST_SENSITIVE;
 namespace MC = MULTICLASS;
 
+#define PASS_START_HOLDOUT 0
+// PASS_START_HOLDOUT: 0 means always use holdout; 1 means use progressive for first pass
+
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 
@@ -152,6 +155,8 @@ struct search_private
   bool global_is_mixed_ldf;      // any task declared mixed ldf _or_ some tasks are ldf and some are not
   bool use_action_costs;         // task promises to define per-action rollout-by-ref costs
 
+  int  search_output_heldout;
+  
   v_array<int32_t> neighbor_features; // ugly encoding of neighbor feature requirements
   auto_condition_settings acset; // settings for auto-conditioning
   size_t history_length;         // value of --search_history_length, used by some tasks, default 1
@@ -202,7 +207,7 @@ struct search_private
   bool debug_oracle;             // debug the oracle
   float perturb_oracle;          // with this probability, choose a random action instead of oracle action
   float perturb_learn;           // with this probability, choose a random action instead of oracle action
-  bool wide_output_format;
+  int wide_output_format;        // 0 = normal, 1 = wide, 2 = multiline
   
   // if we're printing to stderr we need to remember if we've printed the header yet
   // (i.e., we do this if we're driving)
@@ -431,7 +436,7 @@ bool must_run_test(vw&all, vector<example*>ec, bool is_test_ex)
       (! is_test_ex) &&
       ( all.holdout_set_off ||                    // no holdout
         ec[0]->test_only ||
-        (all.current_pass == 0)                   // we need error rates for progressive cost
+        (all.current_pass < PASS_START_HOLDOUT)                   // we need error rates for progressive cost
       ) )
     ;
 }
@@ -468,9 +473,11 @@ void print_update(search_private& priv)
 
   if (!priv.printed_output_header && !all.quiet)
   { const char* header_fmt =
-        priv.wide_output_format
+        (priv.wide_output_format == 0)
+        ? "%-10s %-10s %8s%24s %22s %5s %5s  %7s  %7s  %7s  %-8s\n"
+        : (priv.wide_output_format == 1)
         ? "%-10s %-10s %8s%49s %47s %5s %5s  %7s  %7s  %7s  %-8s\n"
-        : "%-10s %-10s %8s%24s %22s %5s %5s  %7s  %7s  %7s  %-8s\n";
+        : "%-10s %-10s %8s%20s %20s %73s %5s  %7s  %7s  %7s  %-8s\n";
     fprintf(stderr, header_fmt, "average", "since", "instance", "current true",  "current predicted", "cur",  "cur", "predic", "cache", "examples", "");
     fprintf(stderr, header_fmt, "loss",    "last",  "counter",  "output prefix",  "output prefix",    "pass", "pol", "made",    "hits",  "gener", "beta");
     std::cerr.precision(5);
@@ -480,7 +487,7 @@ void print_update(search_private& priv)
   if (!should_print_update(all, priv.hit_new_pass))
     return;
 
-  size_t label_width = priv.wide_output_format ? 45 : 20;
+  size_t label_width = (priv.wide_output_format == 0) ? 20 : (priv.wide_output_format == 1) ? 45 : 105;
   
   char true_label[label_width + 11];
   char pred_label[label_width + 1];
@@ -489,7 +496,7 @@ void print_update(search_private& priv)
 
   float avg_loss = 0.;
   float avg_loss_since = 0.;
-  bool use_heldout_loss = (!all.holdout_set_off && all.current_pass >= 1) && (all.sd->weighted_holdout_examples > 0);
+  bool use_heldout_loss = (!all.holdout_set_off && all.current_pass >= PASS_START_HOLDOUT) && (all.sd->weighted_holdout_examples > 0);
   if (use_heldout_loss)
   { avg_loss       = safediv((float)all.sd->holdout_sum_loss, (float)all.sd->weighted_holdout_examples);
     avg_loss_since = safediv((float)all.sd->holdout_sum_loss_since_last_dump, (float)all.sd->weighted_holdout_examples_since_last_dump);
@@ -507,26 +514,42 @@ void print_update(search_private& priv)
   char total_cach[8]; number_to_natural(priv.total_cache_hits, total_cach);
   char total_exge[8]; number_to_natural(priv.total_examples_generated, total_exge);
 
-  fprintf(stderr, "%-10.6f %-10.6f %8s  [%s] [%s] %5d %5d  %7s  %7s  %7s  %-8f",
-          avg_loss,
-          avg_loss_since,
-          inst_cntr,
-          true_label,
-          pred_label,
-          (int)priv.read_example_last_pass,
-          (int)priv.current_policy,
-          total_pred,
-          total_cach,
-          total_exge,
-          priv.beta);
+  if (priv.wide_output_format < 2)
+  { fprintf(stderr, "%-10.6f %-10.6f %8s  [%s] [%s] %5d %5d  %7s  %7s  %7s  %-8f",
+            avg_loss,
+            avg_loss_since,
+            inst_cntr,
+            true_label,
+            pred_label,
+            (int)priv.read_example_last_pass,
+            (int)priv.current_policy,
+            total_pred,
+            total_cach,
+            total_exge,
+            priv.beta);
+    if (use_heldout_loss)
+      fprintf(stderr, " h");
+  } else
+  { fprintf(stderr, "%-10.6f %-10.6f %8s  [%s] %5d %5d  %7s  %7s  %7s  %-8f",
+            avg_loss,
+            avg_loss_since,
+            inst_cntr,
+            true_label,
+            (int)priv.read_example_last_pass,
+            (int)priv.current_policy,
+            total_pred,
+            total_cach,
+            total_exge,
+            priv.beta);
+    if (use_heldout_loss)
+      fprintf(stderr, " h");
+    fprintf(stderr, "\n                                [%s]", pred_label);
+  }
 
   if (PRINT_CLOCK_TIME)
     { size_t num_sec = (size_t)(((float)(clock() - priv.start_clock_time)) / CLOCKS_PER_SEC);
       std::cerr <<" "<< num_sec << "sec";
     }
-
-  if (use_heldout_loss)
-    fprintf(stderr, " h");
 
   fprintf(stderr, "\n");
   fflush(stderr);
@@ -944,7 +967,7 @@ template<class T> void push_at(v_array<T>& v, T item, size_t pos)
 action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* oracle_actions, size_t oracle_actions_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, uint32_t max_action_allowed)
 { action a = (action)-1;
   uint32_t A = (max_action_allowed == 0) ? priv.A : max_action_allowed;
-  if (priv.use_action_costs)
+  if (priv.use_action_costs && (allowed_actions != nullptr))
   { size_t K = (allowed_actions == nullptr) ? A : allowed_actions_cnt;
     cdbg << "costs = ["; for (size_t k=0; k<K; k++) cdbg << ' ' << allowed_actions_cost[k]; cdbg << " ]" << endl;
     float min_cost = FLT_MAX;
@@ -1427,7 +1450,8 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
   assert((oracle_actions  == nullptr) == (oracle_actions_cnt  == 0));
   assert((condition_on    == nullptr) == (condition_on_names  == nullptr));
   assert(((allowed_actions == nullptr) && (allowed_actions_cost == nullptr)) == (allowed_actions_cnt == 0));
-  assert(priv.use_action_costs == (allowed_actions_cost != nullptr));
+  if (! (priv.is_mixed_ldf && priv.is_ldf) )
+    assert(priv.use_action_costs == (allowed_actions_cost != nullptr));
   if (allowed_actions_cost != nullptr) assert(oracle_actions == nullptr);
 
   // if we're just after the string, choose an oracle action
@@ -1851,7 +1875,7 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
     // do the prediction
     reset_search_structure(priv);
     priv.state = INIT_TEST;
-    priv.should_produce_string = might_print_update(all) || (all.final_prediction_sink.size() > 0) || (all.raw_prediction > 0);
+    priv.should_produce_string = might_print_update(all) || (all.final_prediction_sink.size() > 0) || (all.raw_prediction > 0) || (is_holdout_ex && (priv.search_output_heldout > 0));
     priv.pred_string->str("");
     priv.test_action_sequence.clear();
     run_task(sch, priv.ec_seq);
@@ -1863,6 +1887,14 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
     // generate output
     for (int sink : all.final_prediction_sink)
       all.print_text((int)sink, priv.pred_string->str(), priv.ec_seq[0]->tag);
+
+    if (priv.search_output_heldout > 0)
+    { io_buf::write_file_or_socket(priv.search_output_heldout, "ref: ", 5);
+      all.print_text(priv.search_output_heldout, priv.truth_string->str(), priv.ec_seq[0]->tag);
+      io_buf::write_file_or_socket(priv.search_output_heldout, "sys: ", 5);
+      all.print_text(priv.search_output_heldout, priv.pred_string->str(), priv.ec_seq[0]->tag);
+      io_buf::write_file_or_socket(priv.search_output_heldout, "\n", 1);
+    }
 
     if (all.raw_prediction > 0)
       all.print_text(all.raw_prediction, "", priv.ec_seq[0]->tag);
@@ -2063,6 +2095,8 @@ void do_actual_learning_known_task(vw&all, search& sch)
     if (is_test_ex && is_holdout_ex) break;
   }
 
+  //  cerr << "[" << priv.ec_seq[0]->example_t << " : " << is_test_ex << " " << is_holdout_ex << "]" << endl;
+  
   if (priv.task->task->run_setup) priv.task->task->run_setup(sch, priv.ec_seq);
 
   if (priv.debug_oracle)
@@ -2071,7 +2105,7 @@ void do_actual_learning_known_task(vw&all, search& sch)
   {
     // if we're going to have to print to the screen, generate the "truth" string
     cdbg << "======================================== GET TRUTH STRING (" << priv.current_policy << "," << priv.read_example_last_pass << ") ========================================" << endl;
-    if (might_print_update(all))
+    if (might_print_update(all) || (is_holdout_ex && (priv.search_output_heldout > 0)))
     { if (is_test_ex)
         priv.truth_string->str("**test**");
       else
@@ -2564,6 +2598,7 @@ base_learner* setup(vw&all)
   ("search_total_nb_policies", po::value<size_t>(), "if we are going to train the policies through multiple separate calls to vw, we need to specify this parameter and tell vw how many policies are eventually going to be trained")
 
   ("search_trained_nb_policies", po::value<size_t>(), "the number of trained policies in a file")
+      ("search_output_heldout", po::value<string>(), "output heldout data predictions to this file")
 
   ("search_allowed_transitions",po::value<string>(),"read file of allowed transitions [def: all transitions are allowed]")
   ("search_subsample_time",    po::value<float>(),  "instead of training at all timesteps, use a subset. if value in (0,1), train on a random v%. if v>=1, train on precisely v steps per example, if v<=-1, use active learning")
@@ -2581,7 +2616,8 @@ base_learner* setup(vw&all)
   ("search_force_oracle",                           "always run oracle (useful for debugging oracle); use with -t for instance")
   ("search_debug_oracle",                           "run a series of debugging tests on the reference policy")
   ("search_wide_output",                            "print wider-than-usual output (to fit structured examples)")
-      ("search_constant_beta", "keep beta fixed, not 1-(1-alpha)^2")
+  ("search_wider_output",                           "print very-wider-than-usual output (to fit structured examples)")
+  ("search_constant_beta", "keep beta fixed, not 1-(1-alpha)^2")
   ;
   add_options(all);
   po::variables_map& vm = all.vm;
@@ -2609,7 +2645,13 @@ base_learner* setup(vw&all)
   std::string rollout_string = "mix_per_state";
   std::string rollin_string = "mix_per_state";
 
-  priv.wide_output_format = vm.count("search_wide_output") > 0;
+  priv.search_output_heldout = -1;
+  if (vm.count("search_output_heldout"))
+    priv.search_output_heldout = open(vm["search_output_heldout"].as<string>().c_str(), O_CREAT|O_WRONLY|O_LARGEFILE|O_TRUNC,0666);
+  
+  priv.wide_output_format = 0;
+  if (vm.count("search_wide_output") > 0) priv.wide_output_format = 1;
+  if (vm.count("search_wider_output") > 0) priv.wide_output_format = 2;
   
   check_option<string>(task_string, all, vm, "search_task", false, string_equal,
                        "warning: specified --search_task different than the one loaded from regressor. using loaded value of: ",
@@ -2763,6 +2805,7 @@ base_learner* setup(vw&all)
   all.p->emptylines_separate_examples = true;
 
   bool args_has_non_ldf = (count(all.args.begin(), all.args.end(),"--csoaa") > 0) ||
+                          (count(all.args.begin(), all.args.end(),"--cshsm") > 0) ||
                           (count(all.args.begin(), all.args.end(),"--cb") > 0);
   bool args_has_ldf     = (count(all.args.begin(), all.args.end(),"--csoaa_ldf") > 0) ||
                           (count(all.args.begin(), all.args.end(),"--wap_ldf") > 0);
