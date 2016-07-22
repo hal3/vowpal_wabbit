@@ -152,9 +152,11 @@ struct gen_data
   bool oracle_translation;
   vector<uint32_t> covered;
   vector<string>* en_dict;
+  vector<features*> en_features;
   v_array< pair<action,float> >* costs;
   bool action_costs;
   bool remove_oov;
+  bool verify_alignment;
   Search::predictor* P; // cached predictor for speed
 
   gen_data(size_t _K) :
@@ -169,6 +171,7 @@ struct gen_data
       costs(nullptr),
       action_costs(false),
       remove_oov(true),
+      verify_alignment(false), // need audit
       P(nullptr)
   {}
 };
@@ -190,14 +193,25 @@ vector<string>* read_english_dictionary(string fname)
   return ret;
 }
   
-void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
+void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
 { 
   //  new_options(all, "Search Generator Options")
   //  add_options(all);
-
+  vw& vw_obj = S.get_vw_pointer_unsafe();
   gen_data& G = *new gen_data(num_actions);
   G.en_dict = nullptr;
   G.en_dict = read_english_dictionary("ted.dict");
+  if ((vw_obj.namespace_dictionaries['e'].size() > 0) && (G.en_dict != nullptr))
+  { for (size_t i=0; i<G.en_dict->size(); ++i)
+    { string& en = (*G.en_dict)[i];
+      char* en_c_str = (char*)en.c_str();
+      substring ss = { en_c_str, en_c_str + en.length() };
+      // look it up in the feature dictionary
+      uint64_t hash = uniform_hash(ss.begin, ss.end-ss.begin, quadratic_constant);
+      features* ff = vw_obj.namespace_dictionaries['e'][0]->get(ss, hash);
+      G.en_features.push_back(ff);
+    }
+  }
 
   if (G.action_costs)
   { G.costs  = new v_array< pair<action,float> >();
@@ -206,16 +220,16 @@ void initialize(Search::search& sch, size_t& num_actions, po::variables_map& vm)
       G.costs->push_back(make_pair(k, 0.));
   }
   
-  sch.set_task_data<gen_data>(&G);
-  sch.set_num_learners({true, false}); // LDF for learner 0, not for learner 1
-  sch.ldf_alloc(G.max_output_length);
-  sch.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
-  sch.set_options(0
-                  | Search::AUTO_CONDITION_FEATURES
-                  | Search::NO_CACHING
-                  | Search::IS_MIXED_LDF
-                  | G.action_costs * Search::ACTION_COSTS
-                  );
+  S.set_task_data<gen_data>(&G);
+  S.set_num_learners({true, false}); // LDF for learner 0, not for learner 1
+  S.ldf_alloc(G.max_output_length);
+  S.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
+  S.set_options(0
+                | Search::AUTO_CONDITION_FEATURES
+                | Search::NO_CACHING
+                | Search::IS_MIXED_LDF
+                | G.action_costs * Search::ACTION_COSTS
+                );
 }
 
 
@@ -254,8 +268,7 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   vector<action> target;
   bool has_costs = true;
   for (CS::wclass& wc : lab)
-  { if (wc.class_index != G.oov)
-      target.push_back(wc.class_index);
+  { target.push_back(wc.class_index);
     if ((wc.x < 0.) || (wc.x >= N))
       has_costs = false;
   }
@@ -264,8 +277,17 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   G.ied = new IncrementalEditDistance(target, G.eos, false);
   if (has_costs)
     for (CS::wclass& wc : lab)
-      if (wc.class_index != G.oov)
-        G.align_out_to_in.push_back((size_t) wc.x);
+      G.align_out_to_in.push_back((size_t) wc.x);
+
+  if (G.verify_alignment)
+  { for (size_t i=0; i<target.size(); i++)
+    { cerr << (*G.en_dict)[target[i]] << "\t";
+      size_t j = G.align_out_to_in[i];
+      cerr << j << "\t";
+      cerr << ec[j]->feature_space['f'].space_names[0]->first << "/" << ec[j]->feature_space['f'].space_names[0]->second;
+      cerr << endl;
+    }
+  }
 }
 
 
@@ -300,8 +322,11 @@ void add_all_features(example& ex, example& src, unsigned char tgt_ns, uint64_t 
 { features& tgt_fs = ex.feature_space[tgt_ns];
   for (namespace_index ns : src.indices)
     if(ns != constant_namespace) // ignore constant_namespace
-        for (feature_index i : src.feature_space[ns].indicies)
-            tgt_fs.push_back(val, ((i / multiplier + offset) * multiplier) & mask );
+    { for (feature_index i : src.feature_space[ns].indicies)
+        tgt_fs.push_back(val, ((i / multiplier + offset) * multiplier) & mask );
+      ex.num_features += src.feature_space[ns].indicies.size();
+      ex.total_sum_feat_sq += (float)src.feature_space[ns].indicies.size();
+    }
 }
   
 action predict_alignment(Search::search& S, gen_data& G, vector<example*>& ec, size_t m, action last_a, vector<action>& out)
@@ -379,24 +404,47 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
   VW::clear_example_data(ex);
   VW::copy_example_data(false, &ex, ec[a]);
   ex.weight = 1.;
-  ex.indices.push_back((size_t)'l');
-  ex.indices.push_back((size_t)'r');
-  ex.indices.push_back((size_t)'p');
-  ex.indices.push_back((size_t)'q');
-  ex.indices.push_back((size_t)'b');
+  ex.indices.push_back((size_t)'l');  // left fr context
+  ex.indices.push_back((size_t)'r');  // right fr context
+  ex.indices.push_back((size_t)'p');  // alignment features
+  ex.indices.push_back((size_t)'q');  // previous alignment fr context
+  ex.indices.push_back((size_t)'b');  // bag of words context
+  ex.indices.push_back((size_t)'e');  // previous english output context
   // features of neighboring words
   if (a > 0)   add_all_features(ex, *ec[a-1], 'l', mask, multiplier, 48931043, false, 0.5);
   if (a < N-1) add_all_features(ex, *ec[a+1], 'r', mask, multiplier, 9831487, false, 0.5);
   for (size_t n=0; n<N; n++)
-    add_all_features(ex, *ec[n], 'b', mask, multiplier, 3489101, false, 0.5 * exp(0. - G.covered[n]) / (float)N);
+    add_all_features(ex, *ec[n], 'b', mask, multiplier, 3489101, false, 0.5 /* * exp(0. - G.covered[n]) */ / (float)N);
   // features of previously translated word
   add_all_features(ex, *ec[last_a], 'q', mask, multiplier, 94031871);
   add_feature(ex, multiplier * (4319041 + ((int)a - (int)last_a)), 'p', mask, multiplier);
   add_feature(ex, multiplier * (8902137 + (a > last_a)),           'p', mask, multiplier);
   add_feature(ex, multiplier * (9403183 + (G.covered[a])),         'p', mask, multiplier);
   add_feature(ex, multiplier * (8590137 + ((int)N - (int)out.size())),        'p', mask, multiplier);
+
+  // previous english context
+  size_t M = out.size();
+  for (size_t delta=1; delta<=3; delta++)
+  { int m = (int)M-(int)delta;
+    if (m < 0)
+      add_feature(ex, multiplier * (84930177 + 4983107 * delta), 'e', mask, multiplier);
+    else 
+    { // there in an output word at m
+      if ((G.en_dict != nullptr) && (out[m] < G.en_features.size()))
+      { features* ff = G.en_features[out[m]];
+        if (ff != nullptr)
+          for (size_t i=0; i<ff->indicies.size(); i++)
+            add_feature(ex, multiplier * (84930177 + 493107 * delta + 49101 * ff->indicies[i] / multiplier), 'e', mask, multiplier);
+      } else
+        // no dictionary
+        add_feature(ex, multiplier * (84930177 + 4983107 * delta + 49101 * out[m]), 'e', mask, multiplier);
+    }
+  }
+  
+  // cheating features:
   //for (action w : G.ied->next_actions())
   //  add_feature(ex, multiplier * (4890137 + w), 'p', mask, multiplier);
+  
 
   size_t new_count = 0;
   float new_weight = 0.f;
@@ -432,7 +480,6 @@ void run(Search::search& S, vector<example*>& ec)
 
   size_t N = ec.size();
   size_t M = max(5, min(G.max_output_length, (size_t)( G.max_length_ratio * N )));
-
   action last_a = 0;   // assume that example[0] is padding <s>
   vector<action> out;
   get_oracle(G, ec);
