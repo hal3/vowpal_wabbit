@@ -410,14 +410,22 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
   VW::copy_example_data(false, &ex, ec[a]);
   ex.weight = 1.;
   ex.indices.push_back((size_t)'l');  // left fr context
+  ex.indices.push_back((size_t)'j');  // more left fr context
   ex.indices.push_back((size_t)'r');  // right fr context
+  ex.indices.push_back((size_t)'s');  // more right fr context
   ex.indices.push_back((size_t)'p');  // alignment features
   ex.indices.push_back((size_t)'q');  // previous alignment fr context
   ex.indices.push_back((size_t)'b');  // bag of words context
   ex.indices.push_back((size_t)'e');  // previous english output context
   // features of neighboring words
   if (a > 0)   add_all_features(ex, *ec[a-1], 'l', mask, multiplier, 48931043, false, 0.5);
+  else         add_feature(ex, multiplier * (48931043 + 483910741), 'l', mask, multiplier);
+  if (a > 1)   add_all_features(ex, *ec[a-2], 'j', mask, multiplier, 148931043, false, 0.5);
+  else         add_feature(ex, multiplier * (148931043 + 483910741), 'j', mask, multiplier);
   if (a < N-1) add_all_features(ex, *ec[a+1], 'r', mask, multiplier, 9831487, false, 0.5);
+  else         add_feature(ex, multiplier * (9831487 + 483910741), 'l', mask, multiplier);
+  if (a < N-2) add_all_features(ex, *ec[a+2], 's', mask, multiplier, 19831487, false, 0.5);
+  else         add_feature(ex, multiplier * (19831487 + 483910741), 's', mask, multiplier);
   for (size_t n=0; n<N; n++)
     add_all_features(ex, *ec[n], 'b', mask, multiplier, 3489101, false, 0.5 /* * exp(0. - G.covered[n]) */ / (float)N);
   // features of previously translated word
@@ -435,14 +443,14 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
       add_feature(ex, multiplier * (84930177 + 4983107 * delta), 'e', mask, multiplier);
     else 
     { // there in an output word at m
-      if ((G.en_dict != nullptr) && (out[m] < G.en_features.size()))
+      if (out[m] < G.en_features.size())
       { features* ff = G.en_features[out[m]];
         if (ff != nullptr)
           for (size_t i=0; i<ff->indicies.size(); i++)
             add_feature(ex, multiplier * (84930177 + 493107 * delta * (49101 * ff->indicies[i] /* / multiplier */)), 'e', mask, multiplier);
-      } else
-        // no dictionary
-        add_feature(ex, multiplier * (84930177 + 4983107 * delta * (49101 * out[m] + 840178103)), 'e', mask, multiplier);
+      }
+      // just vanilla feature without dictionary
+      add_feature(ex, multiplier * (84930177 + 4983107 * delta * (49101 * out[m] + 840178103)), 'e', mask, multiplier);
     }
   }
   
