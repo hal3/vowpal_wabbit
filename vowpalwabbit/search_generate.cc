@@ -439,10 +439,10 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
       { features* ff = G.en_features[out[m]];
         if (ff != nullptr)
           for (size_t i=0; i<ff->indicies.size(); i++)
-            add_feature(ex, multiplier * (84930177 + 493107 * delta + 49101 * ff->indicies[i] / multiplier), 'e', mask, multiplier);
+            add_feature(ex, multiplier * (84930177 + 493107 * delta * (49101 * ff->indicies[i] /* / multiplier */)), 'e', mask, multiplier);
       } else
         // no dictionary
-        add_feature(ex, multiplier * (84930177 + 4983107 * delta + 49101 * out[m]), 'e', mask, multiplier);
+        add_feature(ex, multiplier * (84930177 + 4983107 * delta * (49101 * out[m] + 840178103)), 'e', mask, multiplier);
     }
   }
   
