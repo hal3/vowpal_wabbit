@@ -91,7 +91,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
       pred1 = i;
 
   if (is_learn) {
-    float min_cost = -FLT_MAX, max_cost = FLT_MAX;
+    float min_cost = FLT_MAX, max_cost = -FLT_MAX;
     // at the bottom level, we update (all minima) \cup (current prediction)
     hsm.update_bottom.clear();  // which ids
     for (size_t i=0; i<hsm.root; i++)
@@ -101,7 +101,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
     for (CS::wclass& wc : ld.costs)
     { size_t j = (wc.class_index-1) / hsm.leaf;
       min_cost = min(min_cost, wc.x);
-      max_cost = min(min_cost, wc.x);
+      max_cost = max(max_cost, wc.x);
       if (wc.x <= 0.)
         hsm.update_bottom.insert(j);
       if (wc.x < hsm.top_costs[j])
