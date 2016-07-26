@@ -213,6 +213,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   vw& vw_obj = S.get_vw_pointer_unsafe();
   new_options(vw_obj, "Search Generator Options")
       ("generate_soft_loss", "use soft loss instead of hard edit distance loss")
+      ("generate_action_costs", "use action consts instead of binary costs")
       ("generate_output_dictionary", po::value<string>(), "dictionary that maps output ids to output words");
   add_options(vw_obj);
 
@@ -222,6 +223,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   if (vm.count("generate_output_dictionary") > 0)
     G.en_dict = read_english_dictionary(vm["generate_output_dictionary"].as<string>());
   G.soft_loss = vm.count("generate_soft_loss") > 0;
+  G.action_costs = (vm.count("generate_action_costs") > 0) || G.soft_loss;
   
   if ((vw_obj.namespace_dictionaries['e'].size() > 0) && (G.en_dict != nullptr))
   { for (size_t i=0; i<G.en_dict->size(); ++i)

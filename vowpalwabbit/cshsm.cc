@@ -110,6 +110,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
     { size_t j = (wc.class_index-1) / hsm.leaf;
       if (hsm.update_bottom.find(j) != hsm.update_bottom.end())
       { ec.l.simple.label = wc.x * 2. - 1.;
+        //cerr << ec.l.simple.label << ' ';
         //cerr << "learn1(" << hsm.root + wc.class_index - 1 << ")" << endl;
         if (j == pred0)
         { ec.partial_prediction = hsm.pred_leaf[(wc.class_index-1) % hsm.leaf].scalar;
