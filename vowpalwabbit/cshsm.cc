@@ -56,6 +56,17 @@ struct cshsm
 
 ***/
 
+inline void set_label(cshsm& hsm, label_data& l, float cost, float min_cost, float max_cost)
+{ if (hsm.classificationesque)
+  { l.label  = (cost <= min_cost) ? -1.f : 1.f;
+    l.weight = (cost <= min_cost) ? (max_cost - min_cost) : (cost - min_cost);
+  } else
+  { l.label = cost * 2. - 1.;
+    l.weight = 1.;
+  }
+  l.initial = hsm.initial;
+}
+
 template <bool is_learn>
 void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
   CS::label ld = ec.l.cs;
@@ -80,6 +91,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
       pred1 = i;
 
   if (is_learn) {
+    float min_cost = -FLT_MAX, max_cost = FLT_MAX;
     // at the bottom level, we update (all minima) \cup (current prediction)
     hsm.update_bottom.clear();  // which ids
     for (size_t i=0; i<hsm.root; i++)
@@ -88,6 +100,8 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
     hsm.update_bottom.insert(pred0);
     for (CS::wclass& wc : ld.costs)
     { size_t j = (wc.class_index-1) / hsm.leaf;
+      min_cost = min(min_cost, wc.x);
+      max_cost = min(min_cost, wc.x);
       if (wc.x <= 0.)
         hsm.update_bottom.insert(j);
       if (wc.x < hsm.top_costs[j])
@@ -99,7 +113,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
     ec.l.simple = { 0.f, 1.f, 0.f };
     for (size_t i=0; i<hsm.root; i++)
       if (hsm.top_costs[i] < FLT_MAX)
-      { ec.l.simple.label = hsm.top_costs[i] * 2. - 1.;
+      { set_label(hsm, ec.l.simple, hsm.top_costs[i], min_cost, max_cost);
         ec.partial_prediction = hsm.pred_root[i].scalar;
         ec.pred.scalar = ec.partial_prediction;
         //cerr << "learn0(" << i << ")" << endl;
@@ -109,7 +123,8 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
     for (CS::wclass& wc : ld.costs)
     { size_t j = (wc.class_index-1) / hsm.leaf;
       if (hsm.update_bottom.find(j) != hsm.update_bottom.end())
-      { ec.l.simple.label = wc.x * 2. - 1.;
+      { set_label(hsm, ec.l.simple, wc.x, min_cost, max_cost);
+        //ec.l.simple.label = wc.x * 2. - 1.;
         //cerr << ec.l.simple.label << ' ';
         //cerr << "learn1(" << hsm.root + wc.class_index - 1 << ")" << endl;
         if (j == pred0)
