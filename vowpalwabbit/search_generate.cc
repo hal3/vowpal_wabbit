@@ -42,13 +42,17 @@ unsigned int levenshtein_distance(const vector<action>& s1, const vector<action>
 class IncrementalEditDistance
 {
 public:
-  IncrementalEditDistance(vector<action>& target, action eos=1, bool verify=false, size_t subst_cost=1, size_t ins_cost=1, size_t del_cost=1)
-      : target(target), subst_cost(subst_cost), ins_cost(ins_cost), del_cost(del_cost), N(target.size()), eos(eos), verify(verify)
+  IncrementalEditDistance(vector<action>& target, action eos=1, bool soft_loss=false, bool verify=false, size_t subst_cost=1, size_t ins_cost=1, size_t del_cost=1)
+      : target(target), subst_cost(subst_cost), ins_cost(ins_cost), del_cost(del_cost), N(target.size()), eos(eos), verify(verify), soft_loss(soft_loss)
   { prev_row = new size_t[N+1];
     cur_row  = new size_t[N+1];
 
     for (size_t n=0; n<=N; n++)
       prev_row[n] = del_cost * n;
+
+    if (soft_loss)
+      for (action& a : target)
+        target_words[a] ++;
 
     prev_row_min = 0;
   }
@@ -68,6 +72,8 @@ public:
     prev_row = tmp;
     if (verify)
       verify_prediction.push_back(a);
+    if (soft_loss)
+      target_words[a] --;
   }
 
   void append(vector<action>& s) { for (action a : s) append(a); }
@@ -83,6 +89,11 @@ public:
 
   void actions_with_cost(v_array<pair<action,float>>& AC)
   { for (auto& p: AC) p.second = 1.;
+    if (soft_loss)
+      for (auto const& entry : target_words)
+        if (entry.second > 0)
+          AC[ entry.first-1 ].second = 0.5;
+    
     AC[eos-1].second = finish_distance(); // minf(100., (float)(prev_row[N] - prev_row_min)); // </s>
     for (size_t n=0; n<N; n++)
       if (prev_row[n] == prev_row_min)
@@ -128,12 +139,14 @@ private:
   size_t* prev_row;
   size_t* cur_row;
   vector<action> target;
+  std::map<action,int> target_words;
   vector<action> verify_prediction;
   set<action> A;
   set<size_t> P;
   size_t subst_cost, ins_cost, del_cost, prev_row_min, N;
   action eos;
   bool verify; // should we verify correctness of finish_distance()?
+  bool soft_loss;
   
   inline size_t min3(size_t a, size_t b, size_t c) { return (a < b) ? (a < c) ? a : c : (b < c) ? b : c; }
 };
@@ -157,6 +170,7 @@ struct gen_data
   bool action_costs;
   bool remove_oov;
   bool verify_alignment;
+  bool soft_loss;
   Search::predictor* P; // cached predictor for speed
 
   gen_data(size_t _K) :
@@ -172,6 +186,7 @@ struct gen_data
       action_costs(false),
       remove_oov(true),
       verify_alignment(false), // need audit
+      soft_loss(false),
       P(nullptr)
   {}
 };
@@ -197,6 +212,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
 { 
   vw& vw_obj = S.get_vw_pointer_unsafe();
   new_options(vw_obj, "Search Generator Options")
+      ("generate_soft_loss", "use soft loss instead of hard edit distance loss")
       ("generate_output_dictionary", po::value<string>(), "dictionary that maps output ids to output words");
   add_options(vw_obj);
 
@@ -205,6 +221,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   G.en_dict = nullptr;
   if (vm.count("generate_output_dictionary") > 0)
     G.en_dict = read_english_dictionary(vm["generate_output_dictionary"].as<string>());
+  G.soft_loss = vm.count("generate_soft_loss") > 0;
   
   if ((vw_obj.namespace_dictionaries['e'].size() > 0) && (G.en_dict != nullptr))
   { for (size_t i=0; i<G.en_dict->size(); ++i)
@@ -279,7 +296,7 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   }
   target.pop_back();
   //cerr << "target = "; for (auto i : target) cerr << i << ' '; cerr << endl;
-  G.ied = new IncrementalEditDistance(target, G.eos, false);
+  G.ied = new IncrementalEditDistance(target, G.eos, G.soft_loss);
   if (has_costs)
     for (CS::wclass& wc : lab)
       G.align_out_to_in.push_back((size_t) wc.x);
