@@ -87,14 +87,14 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
     if (hsm.pred_root[i].scalar < hsm.pred_root[pred0].scalar)
       pred0 = i;
 
-  uint32_t top = hsm.leaf; // min(hsm.leaf, hsm.k - hsm.leaf * pred0 + 1);
   uint32_t prediction = 0;
   
   uint32_t pred1 = 0;
   uint32_t pred_leaf_lo1 = 0, pred_leaf_hi1 = 0;
   uint32_t pred_leaf_lo2 = 0, pred_leaf_hi2 = 0;
   if (! hsm.redundant)
-  { base.multipredict(ec, hsm.root + hsm.leaf * pred0, top, hsm.pred_leaf, false);
+  { uint32_t top = min(hsm.leaf, hsm.K - hsm.leaf * pred0 + 1);
+    base.multipredict(ec, hsm.root + hsm.leaf * pred0, top, hsm.pred_leaf, false);
     //cerr << "hsm.pred" << pred0 << " ="; for (size_t i=0; i<top; i++) cerr << ' ' << hsm.pred[i].scalar; cerr << endl;
     for (uint32_t i=1; i<top; i++)
       if (hsm.pred_leaf[i].scalar < hsm.pred_leaf[pred1].scalar)
@@ -104,8 +104,8 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
   { // redundant representation needs a bit more work. except for
     // first L/2 classes, we need to make L predictions, starting
     // at position root + (L/2)*pred0
-    //cerr << disp(pred0) << disp(hsm.leaf);
-    if (pred0 != hsm.leaf-1)
+    //cerr << disp(pred0) << disp(hsm.leaf) << endl;
+    if (pred0 != hsm.root-1)
     { base.multipredict(ec, hsm.root + hsm.leaf/2 * pred0, hsm.leaf, hsm.pred_leaf, false);
       pred_leaf_lo1 = hsm.leaf/2 * pred0;
       pred_leaf_hi1 = pred_leaf_lo1 + hsm.leaf;
@@ -117,13 +117,15 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
     } else
     { // when pred0=L-1, we need to predict the last few classes (<=L/2) and the first L/2 classes
       base.multipredict(ec, hsm.root + 0, hsm.leaf/2, hsm.pred_leaf, false);  // predict k=1,2,3,...,L/2
-      base.multipredict(ec, hsm.root + hsm.leaf/2 * pred0, hsm.leaf/2, hsm.pred_leaf + hsm.leaf/2, false); // predict the last classes at pred_leaf[L/2...]
+      uint32_t top = (hsm.K < hsm.leaf/2 * pred0) ? 0 : (hsm.K - hsm.leaf/2 * pred0);
+      base.multipredict(ec, hsm.root + hsm.leaf/2 * pred0, top, hsm.pred_leaf + hsm.leaf/2, false); // predict the last classes at pred_leaf[L/2...]
       pred_leaf_lo1 = 0;
       pred_leaf_hi1 = hsm.leaf/2;
       pred_leaf_lo2 = hsm.leaf/2 * pred0;
       pred_leaf_hi2 = pred_leaf_lo2 + hsm.leaf/2;
+      //cerr << disp(top) << disp(pred_leaf_lo1) << disp(pred_leaf_hi1) << disp(pred_leaf_lo2) << disp(pred_leaf_hi2) << endl;
       //cerr << " hsm.pred_leaf1=[" ; for (uint32_t i=0; i<hsm.leaf; i++) cerr << ' ' << hsm.pred_leaf[i].scalar; cerr << " ]" << endl;
-      for (uint32_t i=1; i<hsm.leaf; i++)
+      for (uint32_t i=1; i<hsm.leaf/2 + top; i++)
         if (hsm.pred_leaf[i].scalar < hsm.pred_leaf[pred1].scalar)
           pred1 = i;
       if (pred1 < hsm.leaf/2)
@@ -132,6 +134,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         prediction = hsm.leaf/2 * pred0 + (pred1 - hsm.leaf/2) + 1;
     }
   }
+  //cerr << disp(pred0) << disp(pred1) << disp(prediction) << endl;
   if (is_learn) {
     float min_cost = FLT_MAX, max_cost = -FLT_MAX;
     // at the bottom level, we update (all minima) \cup (current prediction)
@@ -166,19 +169,6 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         }
         hsm.top_costs[j ] = min(hsm.top_costs[j ], wc.x);
         hsm.top_costs[j2] = min(hsm.top_costs[j2], wc.x);
-        /*
-          hsm.update_bottom.insert(0);
-          hsm.update_bottom.insert(hsm.root-1);
-          hsm.top_costs[0] = min(hsm.top_costs[0], wc.x);
-          hsm.top_costs[hsm.root-1] = min(hsm.top_costs[hsm.root-1], wc.x);
-        } else
-        { // normal case
-          size_t jj = (wc.class_index-1-hsm.leaf/2) / (hsm.leaf/2);
-          hsm.update_bottom.insert(jj);
-          hsm.update_bottom.insert(jj+1);
-          hsm.top_costs[jj  ] = min(hsm.top_costs[jj  ], wc.x);
-          hsm.top_costs[jj+1] = min(hsm.top_costs[jj+1], wc.x);
-          } */
       }
     //cerr << "hsm.update_bottom = "; for (auto x : hsm.update_bottom) cerr << x << ' '; cerr << endl;
     //cerr << "hsm.top_costs     = "; for (auto x : hsm.top_costs) cerr << x << ' '; cerr << endl;
@@ -189,7 +179,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
       { set_label(hsm, ec.l.simple, hsm.top_costs[i], min_cost, max_cost);
         ec.partial_prediction = hsm.pred_root[i].scalar;
         ec.pred.scalar = ec.partial_prediction;
-        //cerr << "learn0(" << i << ")" << endl;
+        //cerr << "learn0(" << i << ", " << ec.l.simple.label << ")" << endl;
         base.learn(ec, i); // TODO: update
       }
 
@@ -214,19 +204,24 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         { ec.partial_prediction = hsm.pred_leaf[(wc.class_index-1) % hsm.leaf].scalar;
           ec.pred.scalar = ec.partial_prediction;
           base.update(ec, hsm.root + wc.class_index - 1);
+          //cerr << "learn1(root + " << wc.class_index << " - 1, " << ec.l.simple.label << ")" << endl;
         }
         else if (hsm.redundant && (pred_leaf_lo1 <= wc.class_index-1) && (wc.class_index-1 < pred_leaf_hi1))
         { //cerr << disp(wc.class_index) << disp(pred_leaf_lo1) << disp(pred_leaf_hi1) << endl;
           ec.partial_prediction = hsm.pred_leaf[wc.class_index-1 - pred_leaf_lo1].scalar;
           ec.pred.scalar = ec.partial_prediction;
           base.update(ec, hsm.root + wc.class_index - 1);
+          //cerr << "learn2(root + " << wc.class_index << " - 1, " << ec.l.simple.label << ")" << endl;
         }
         else if (hsm.redundant && (pred_leaf_lo2 <= wc.class_index-1) && (wc.class_index-1 < pred_leaf_hi2))
         { ec.partial_prediction = hsm.pred_leaf[wc.class_index-1 - pred_leaf_lo2 + hsm.leaf/2].scalar;
           ec.pred.scalar = ec.partial_prediction;
           base.update(ec, hsm.root + wc.class_index - 1);
+          //cerr << "learn3(root + " << wc.class_index << " - 1, " << ec.l.simple.label << ")" << endl;
         } else
-          base.learn(ec, hsm.root + wc.class_index - 1);
+        { base.learn(ec, hsm.root + wc.class_index - 1);
+          //cerr << "learn4(root + " << wc.class_index << " - 1, " << ec.l.simple.label << ")" << endl;
+        }          
         //cerr << "learn1(hsm.root + " << wc.class_index << " - 1)" << endl;
       }
     }
@@ -270,7 +265,7 @@ base_learner* cshsm_setup(vw& all)
   if (c.redundant)
     c.leaf *= 2;
 
-  //cerr << disp(c.root) << disp(c.leaf) << endl;
+  //cerr << disp(c.root) << disp(c.leaf) << disp (ceil_K) << endl;
   
   c.pred_root = calloc_or_throw<polyprediction>(c.root);
   c.pred_leaf = calloc_or_throw<polyprediction>(c.leaf);
