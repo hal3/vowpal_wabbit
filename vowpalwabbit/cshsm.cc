@@ -132,7 +132,6 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         prediction = hsm.leaf/2 * pred0 + (pred1 - hsm.leaf/2) + 1;
     }
   }
-
   if (is_learn) {
     float min_cost = FLT_MAX, max_cost = -FLT_MAX;
     // at the bottom level, we update (all minima) \cup (current prediction)
@@ -146,27 +145,40 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
       max_cost = max(max_cost, wc.x);
     }
     for (CS::wclass& wc : ld.costs)
-      if (wc.x <= min_cost)
-      { if (!hsm.redundant)
-        { size_t j = (wc.class_index-1) / hsm.leaf;
+      if (!hsm.redundant)
+      { size_t j = (wc.class_index-1) / hsm.leaf;
+        if (wc.x <= min_cost)
           hsm.update_bottom.insert(j);
-          hsm.top_costs[j] = min(hsm.top_costs[j], wc.x);
+        hsm.top_costs[j] = min(hsm.top_costs[j], wc.x);
+      } else
+      { // redundant
+        uint32_t j, j2;
+        if (wc.class_index <= hsm.leaf/2)
+        { j  = 0;
+          j2 = hsm.root -1;
         } else
-        { // redundant
-          if (wc.class_index <= hsm.leaf/2)
-          { hsm.update_bottom.insert(0);
-            hsm.update_bottom.insert(hsm.root-1);
-            hsm.top_costs[0] = min(hsm.top_costs[0], wc.x);
-            hsm.top_costs[hsm.root-1] = min(hsm.top_costs[hsm.root-1], wc.x);
-          } else
-          { // normal case
-            size_t jj = (wc.class_index-1-hsm.leaf/2) / (hsm.leaf/2);
-            hsm.update_bottom.insert(jj);
-            hsm.update_bottom.insert(jj+1);
-            hsm.top_costs[jj  ] = min(hsm.top_costs[jj  ], wc.x);
-            hsm.top_costs[jj+1] = min(hsm.top_costs[jj+1], wc.x);
-          }
+        { j  = (wc.class_index-1-hsm.leaf/2) / (hsm.leaf/2);
+          j2 = j + 1;
         }
+        if (wc.x <= min_cost)
+        { hsm.update_bottom.insert(j);
+          hsm.update_bottom.insert(j2);
+        }
+        hsm.top_costs[j ] = min(hsm.top_costs[j ], wc.x);
+        hsm.top_costs[j2] = min(hsm.top_costs[j2], wc.x);
+        /*
+          hsm.update_bottom.insert(0);
+          hsm.update_bottom.insert(hsm.root-1);
+          hsm.top_costs[0] = min(hsm.top_costs[0], wc.x);
+          hsm.top_costs[hsm.root-1] = min(hsm.top_costs[hsm.root-1], wc.x);
+        } else
+        { // normal case
+          size_t jj = (wc.class_index-1-hsm.leaf/2) / (hsm.leaf/2);
+          hsm.update_bottom.insert(jj);
+          hsm.update_bottom.insert(jj+1);
+          hsm.top_costs[jj  ] = min(hsm.top_costs[jj  ], wc.x);
+          hsm.top_costs[jj+1] = min(hsm.top_costs[jj+1], wc.x);
+          } */
       }
     //cerr << "hsm.update_bottom = "; for (auto x : hsm.update_bottom) cerr << x << ' '; cerr << endl;
     //cerr << "hsm.top_costs     = "; for (auto x : hsm.top_costs) cerr << x << ' '; cerr << endl;
@@ -178,7 +190,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         ec.partial_prediction = hsm.pred_root[i].scalar;
         ec.pred.scalar = ec.partial_prediction;
         //cerr << "learn0(" << i << ")" << endl;
-        base.update(ec, i); // TODO: update
+        base.learn(ec, i); // TODO: update
       }
 
     for (CS::wclass& wc : ld.costs)
@@ -213,21 +225,6 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         { ec.partial_prediction = hsm.pred_leaf[wc.class_index-1 - pred_leaf_lo2 + hsm.leaf/2].scalar;
           ec.pred.scalar = ec.partial_prediction;
           base.update(ec, hsm.root + wc.class_index - 1);
-          /*          
-        } else if (hsm.redundant && (pred0 != hsm.leaf-1) && ((j == pred0) || (j2 == pred0)))
-        { ec.partial_prediction = hsm.pred_leaf[wc.class_index-1 - hsm.leaf/2 * pred0].scalar;
-          ec.pred.scalar = ec.partial_prediction;
-          base.update(ec, hsm.root + wc.class_index - 1);
-        } else if (hsm.redundant && (pred0 == hsm.leaf-1) && ((j == pred0) || (j2 == pred0)))
-        { if (wc.class_index <= hsm.leaf/2)
-            ec.partial_prediction = hsm.pred_leaf[wc.class_index-1].scalar;
-          else {
-            cerr << disp(wc.class_index) << " -> " << hsm.leaf/2 + wc.class_index-1 - hsm.leaf/2*pred0 << endl;
-            ec.partial_prediction = hsm.pred_leaf[hsm.leaf/2 + wc.class_index-1 - hsm.leaf/2*pred0].scalar;
-          }
-          ec.pred.scalar = ec.partial_prediction;
-          base.update(ec, hsm.root + wc.class_index - 1);
-          */
         } else
           base.learn(ec, hsm.root + wc.class_index - 1);
         //cerr << "learn1(hsm.root + " << wc.class_index << " - 1)" << endl;
