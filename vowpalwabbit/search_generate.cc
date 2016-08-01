@@ -209,8 +209,8 @@ std::ostream& operator<<(std::ostream& os, const counter& A)
 class IncrementalBleu
 {
 public:
-  IncrementalBleu(vector<action>& target, action vocab_size, action eos=1)
-      : target(target), eos(eos), num_off_target(0), vocab_size(vocab_size)
+  IncrementalBleu(vector<action>& target, action vocab_size, bool super_greedy, action eos=1)
+      : target(target), eos(eos), num_off_target(0), vocab_size(vocab_size), super_greedy(super_greedy)
   { // start out with empty intersection
     memset(inter_size, 0., 4 * sizeof(uint32_t));
     // initialize reference ngram counts
@@ -287,6 +287,7 @@ private:
   counter g[4], ref[4], inter[4];
   int32_t inter_size[4];
   action vocab_size;
+  bool super_greedy;
   // cached info
   bool _cache_updated;
   set<action> _next_actions;
@@ -471,8 +472,12 @@ private:
   float maxbleu_completion_cost(action first_action)
   { float max_bleu = -FLT_MAX;
     int max_to_go = 1000;
+    action foo;
     _append(first_action);
-    maxbleu_completion_rec(4, max_to_go, max_bleu);
+    if (super_greedy)
+      max_bleu = greedy_finish_bleu(foo);
+    else
+      maxbleu_completion_rec(4, max_to_go, max_bleu);
     unappend();
     return 1. - max_bleu;
   }
@@ -554,6 +559,7 @@ struct gen_data
   bool remove_oov;
   bool verify_alignment;
   bool soft_loss;
+  bool super_greedy;
   Search::predictor* P; // cached predictor for speed
 
   gen_data(size_t _K) :
@@ -570,6 +576,7 @@ struct gen_data
       remove_oov(true),
       verify_alignment(false), // need audit
       soft_loss(false),
+      super_greedy(false),
       P(nullptr)
   {}
 };
@@ -597,6 +604,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   new_options(vw_obj, "Search Generator Options")
       ("generate_soft_loss", "use soft loss instead of hard edit distance loss")
       ("generate_action_costs", "use action consts instead of binary costs")
+      ("generate_super_greedy", "do completely greedy rollouts")
       ("generate_output_dictionary", po::value<string>(), "dictionary that maps output ids to output words");
   add_options(vw_obj);
 
@@ -605,6 +613,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   G.en_dict = nullptr;
   if (vm.count("generate_output_dictionary") > 0)
     G.en_dict = read_english_dictionary(vm["generate_output_dictionary"].as<string>());
+  G.super_greedy = vm.count("generate_super_greedy") > 0;
   G.soft_loss = vm.count("generate_soft_loss") > 0;
   G.action_costs = (vm.count("generate_action_costs") > 0) || G.soft_loss;
   
@@ -686,7 +695,7 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   target.pop_back();
   //cerr << "target = "; for (auto i : target) cerr << i << ' '; cerr << endl;
   //G.reference = new IncrementalED(target, G.eos, G.soft_loss);
-  G.reference = new IncrementalBleu(target, G.K, G.eos);
+  G.reference = new IncrementalBleu(target, G.K, G.super_greedy, G.eos);
   if (has_costs)
     for (CS::wclass& wc : lab)
       G.align_out_to_in.push_back((size_t) wc.x);
