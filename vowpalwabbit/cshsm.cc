@@ -101,6 +101,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
       if (hsm.pred_leaf[i].scalar < hsm.pred_leaf[pred1].scalar)
         pred1 = i;
     prediction = pred0 * hsm.leaf + pred1 + 1;
+    assert(prediction <= hsm.K);
   } else
   { // redundant representation needs a bit more work. except for
     // first L/2 classes, we need to make L predictions, starting
@@ -277,6 +278,7 @@ base_learner* cshsm_setup(vw& all)
     THROW("cannot do both --redundant and --filter yet" << endl);
   c.classificationesque = all.vm.count("classificationesque") > 0;
   c.leaf = (uint32_t)ceilf((float)c.K / (float)c.root);
+  c.root = (uint32_t)ceilf((float)c.K / (float)c.leaf); // correct if overshot
   size_t ceil_K = c.root * (c.leaf+1);
   if (c.redundant)
     c.leaf *= 2;

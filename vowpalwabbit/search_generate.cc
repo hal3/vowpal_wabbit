@@ -17,7 +17,6 @@
 namespace CS=COST_SENSITIVE;
 
 namespace GenerateTask {
-#define disp(x) #x << '=' << x << ' '
   
 Search::search_task task = { "generate", run, initialize, finish, nullptr, nullptr }; // setup, takedown };
 
@@ -223,10 +222,6 @@ public:
       target_a.insert(target[n]);
     }
     _cache_updated = false;
-    // greedy_neg_bleu[0] = vector< pair<float,action> >();
-    // greedy_neg_bleu[1] = vector< pair<float,action> >();
-    // greedy_neg_bleu[2] = vector< pair<float,action> >();
-    // greedy_neg_bleu[3] = vector< pair<float,action> >();
     //cerr << "IncrementalBleu " << disp(target) << endl;
   }
 
@@ -251,7 +246,7 @@ public:
   void append(vector<action>& s) { for (action a : s) append(a); }
 
   set<action>& next_actions()
-  { if (num_off_target > 0)
+  { if ((num_off_target > 0))
       update_cache();
     else
     { _next_actions.clear();
@@ -262,7 +257,7 @@ public:
   }
 
   set<size_t>& next_positions()
-  { if (num_off_target > 0)
+  { if ((num_off_target > 0))
       update_cache();
     else
     { _next_positions.clear();
@@ -272,15 +267,17 @@ public:
   }
 
   void actions_with_cost(v_array<pair<action,float>>& AC)
-  { for (auto& p: AC) p.second = _non_target_loss;
+  { update_cache();
+    for (auto& p: AC) p.second = _non_target_loss;
     AC[eos-1].second = _eos_loss;
     for (auto& p: _target_a_loss)
       AC[p.first-1].second = p.second;
+    //assert(false);
   }
 
   float finish_loss()
   { return 1. - bleu(); }
-  
+  // TODO: exclude OOV
 private:
   vector<action> target;
   vector<action> str;
@@ -322,7 +319,9 @@ private:
     float min_cost = _eos_loss;
 
     for (action a : target_a)
-    { float cost = maxbleu_completion_cost(a);
+    { //cerr << "computing maxbleu_completion_cost for " << disp(a) << endl;
+      float cost = maxbleu_completion_cost(a);
+      //cerr << "got " << disp(a) << disp(cost) << endl;
       _target_a_loss[a] = cost;
       //cerr << disp(a) << disp(cost) << endl;
       min_cost = std::min(min_cost, cost);
@@ -434,6 +433,10 @@ private:
     action a0,a1;
     float bleu = greedy_finish_bleu(a0);
     max_bleu = std::max(bleu, max_bleu);
+    if (0)
+    { for (size_t i=max_depth; i<=5; i++) cerr << "  ";
+      cerr << disp(bleu) << disp(str) << endl;
+    }
     if ((max_depth <= 0) || (--max_to_go <= 0))
       return;
     // otherwise we want to recurse
@@ -449,6 +452,9 @@ private:
         greedy_neg_bleu[max_depth].push_back( make_pair(0. - bleu, w1) );
       }
     std::sort(greedy_neg_bleu[max_depth].begin(), greedy_neg_bleu[max_depth].end());
+    //for (size_t i=max_depth; i<=5; i++) cerr << "  ";
+    //cerr << "greedy_neg_bleu[" << max_depth << "] =";
+    //for (auto& p : greedy_neg_bleu[max_depth]) cerr << ' ' << p.first << ':' << p.second; cerr << endl;
     // now, start going through in order
     for (auto& p : greedy_neg_bleu[max_depth])
     { action w1 = p.second;
@@ -456,6 +462,7 @@ private:
       if (greedy_bleu < multiplier * max_bleu)
         continue;
       _append(w1);
+      //for (size_t i=max_depth; i<=5; i++) cerr << "  "; cerr << "append " << w1 << endl;
       maxbleu_completion_rec(max_depth-1, max_to_go, max_bleu);
       unappend();
     }
@@ -477,35 +484,43 @@ private:
     
     first_action = 0;
     bool improved = true;
-    while (improved && (num_append < 3))
+    while (improved && (num_append < 40))
     { action a = 0;
+      //cerr << str << endl;
       if ((n >= 3) && (ref[2][mk_ngram(str[n-3], str[n-2], str[n-1])] > 0))
         for (action w : target_a)
           if (could_use_ngram(str[n-3], str[n-2], str[n-1], w)) { a = w; break; }
+      //cerr << "3g " << disp(num_append) << disp(a) << endl;
 
+      //cerr << disp(a) << disp(n) << " ref=" << (int)ref[1][mk_ngram(str[n-2], str[n-1])] << endl;
       if ((a == 0) && (n >= 2) && (ref[1][mk_ngram(str[n-2], str[n-1])] > 0))
         for (action w : target_a)
           if (could_use_ngram(str[n-2], str[n-1], w)) { a = w; break; }
+      //cerr << "2g " << disp(num_append) << disp(a) << endl;
 
       if ((a == 0) && (n >= 1) && (ref[0][mk_ngram(str[n-1])] > 0))
         for (action w : target_a)
           if (could_use_ngram(str[n-1], w)) { a = w; break; }
+      //cerr << "1g " << disp(num_append) << disp(a) << endl;
     
       if (a == 0)
         for (action w : target) // target instead of target_a so we get earlier instances of unseen words
           if (could_use_ngram(w)) { a = w; break; }
+      //cerr << "0g " << disp(num_append) << disp(a) << endl;
 
       if (a == 0)
         break;
 
       if (num_append == 0) first_action = a;
       _append(a);
+      n++;
       num_append++;
       float cur_bleu = bleu();
       if (cur_bleu > best_bleu)
         best_bleu = cur_bleu;
       else
         improved = false;
+      //cerr << disp(cur_bleu) << disp(best_bleu) << disp(improved) << endl << endl;
     }
     for (int unap=0; unap<num_append; unap++)
       unappend();
@@ -515,6 +530,7 @@ private:
   bool could_use_ngram(action w0, action w1=0, action w2=0, action w3=0)
   { ngram ng = mk_ngram(w0,w1,w2,w3);
     int len = (w1 == 0) ? 0 : (w2 == 0) ? 1 : (w3 == 0) ? 2 : 3;
+    //cerr << "  could_use_ngram " << disp(w0) << disp(w1) << disp(w2) << disp(w3) << disp(len) << " ref=" << (int)ref[len][ng] << " g=" << (int)g[len][ng] << " --> " << (ref[len][ng] > g[len][ng]) << endl;
     return ref[len][ng] > g[len][ng];
   }
 };
@@ -857,7 +873,7 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
     ex.total_sum_feat_sq += new_weight;
   }
   
-  if ((G.reference != nullptr) && (false || S.predictNeedsReference()))
+  if ((G.reference != nullptr) && (G.action_costs || S.predictNeedsReference()))
   { if (G.action_costs)
     { G.reference->actions_with_cost(* G.costs);
       P.set_allowed(*G.costs);

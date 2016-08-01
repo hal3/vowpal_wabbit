@@ -12,6 +12,8 @@ license as described in the file LICENSE.
 #define cdbg if (1) {} else clog
 // comment the previous two lines if you want loads of debug output :)
 
+#define disp(x) #x << '=' << x << ' '
+
 typedef uint32_t    action;
 typedef uint32_t    ptag;
 

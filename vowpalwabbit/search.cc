@@ -1451,7 +1451,9 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
   assert((condition_on    == nullptr) == (condition_on_names  == nullptr));
   assert(((allowed_actions == nullptr) && (allowed_actions_cost == nullptr)) == (allowed_actions_cnt == 0));
   if (! (priv.is_mixed_ldf && priv.is_ldf) )
+  { //cerr << disp(priv.use_action_costs) << disp(allowed_actions_cost) << endl;
     assert(priv.use_action_costs == (allowed_actions_cost != nullptr));
+  }
   if (allowed_actions_cost != nullptr) assert(oracle_actions == nullptr);
 
   // if we're just after the string, choose an oracle action
