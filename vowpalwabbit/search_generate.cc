@@ -878,6 +878,12 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
         add_feature(ex, multiplier * (84930177 + 4983107 * delta * (49101 * out[m] + 840178103)), 'e', mask, multiplier);
       }
     }
+    // bag of english words and bigrams
+    for (size_t m=0; m<M; m++)
+    { add_feature(ex, multiplier * (48304733 + 67819371 * (out[m] + 9403285171)), 'e', mask, multiplier);
+      if (m > 0)
+        add_feature(ex, multiplier * (76271324 + 59012761 * (out[m] + 4893107 * (out[m-1] + 5891076))), 'e', mask, multiplier);
+    }
   
     // cheating features:
     //for (action w : G.reference->next_actions())
