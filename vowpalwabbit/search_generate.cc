@@ -16,7 +16,10 @@
 
 namespace CS=COST_SENSITIVE;
 
+
+
 namespace GenerateTask {
+const size_t max_input_length = 200;
   
 Search::search_task task = { "generate", run, initialize, finish, nullptr, nullptr }; // setup, takedown };
 
@@ -573,7 +576,7 @@ struct gen_data
       oov(2),
       reference(nullptr),
       max_output_length(40),
-      oracle_alignment(true),
+      oracle_alignment(false),
       oracle_translation(false),
       costs(nullptr),
       action_costs(false),
@@ -610,6 +613,8 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   new_options(vw_obj, "Search Generator Options")
       ("generate_soft_loss", "use soft loss instead of hard edit distance loss")
       ("generate_action_costs", "use action consts instead of binary costs")
+      ("generate_oracle_alignment", "use oracle alignment (ie cheat and don't predict alignments ourselves)")
+      ("generate_oracle_translation", "use oracle translation (ie cheat massively)")
       ("generate_super_greedy", "do completely greedy rollouts")
       ("generate_optimize_blue", "optimize bleu (instead of edit distance) -- currently not really working")
       ("generate_show_alignments", "show alignments in output")
@@ -626,6 +631,8 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   G.soft_loss = vm.count("generate_soft_loss") > 0;
   G.action_costs = (vm.count("generate_action_costs") > 0) || G.soft_loss;
   G.show_alignments = vm.count("generate_show_alignments") > 0;
+  G.oracle_alignment = vm.count("generate_oracle_alignment") > 0;
+  G.oracle_translation = vm.count("generate_oracle_translation") > 0;
   
   if ((vw_obj.namespace_dictionaries['e'].size() > 0) && (G.en_dict != nullptr))
   { for (size_t i=0; i<G.en_dict->size(); ++i)
@@ -648,7 +655,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   
   S.set_task_data<gen_data>(&G);
   S.set_num_learners({true, false}); // LDF for learner 0, not for learner 1
-  S.ldf_alloc(G.max_output_length);
+  S.ldf_alloc(max_input_length);
   S.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
   S.set_options(0
                 | Search::AUTO_CONDITION_FEATURES
@@ -683,7 +690,7 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   //
   // for test examples, leave the label on the first line blank
 
-  size_t N = ec.size();
+  size_t N = min(ec.size(), max_input_length);
   
   if (G.reference != nullptr)
   { delete G.reference;
@@ -756,10 +763,10 @@ set<size_t>* alignment_oracle(gen_data& G)
   return aln;
 }
 
-void inline add_feature(example& ex, uint64_t idx, unsigned char ns, uint64_t mask, uint64_t multiplier, bool audit=false)
-{ ex.feature_space[(int)ns].push_back(1.0f, (idx * multiplier) & mask);
+void inline add_feature(example& ex, uint64_t idx, unsigned char ns, uint64_t mask, uint64_t multiplier, float val=1., bool audit=false)
+{ ex.feature_space[(int)ns].push_back(val, (idx * multiplier) & mask);
   ex.num_features++;
-  ex.total_sum_feat_sq += 1.;
+  ex.total_sum_feat_sq += val * val;
 }
 
 void add_all_features(example& ex, example& src, unsigned char tgt_ns, uint64_t mask, uint64_t multiplier, uint64_t offset, bool audit=false, float val=1.f)
@@ -772,9 +779,42 @@ void add_all_features(example& ex, example& src, unsigned char tgt_ns, uint64_t 
       ex.total_sum_feat_sq += (float)src.feature_space[ns].indicies.size();
     }
 }
+
+void add_output_features(gen_data& G, example&ex, size_t multiplier, size_t mask, vector<action>& out)
+{ size_t M = out.size();
+  for (size_t delta=1; delta<=3; delta++)
+  { int m = (int)M-(int)delta;
+    if (m < 0)
+      add_feature(ex, (84930177 + 4983107 * delta), 'e', mask, multiplier);
+    else 
+    { // there in an output word at m
+      if (out[m] < G.en_features.size())
+      { features* ff = G.en_features[out[m]];
+        if (ff != nullptr)
+          for (size_t i=0; i<ff->indicies.size(); i++)
+            add_feature(ex, (84930177 + 493107 * delta * (49101 * ff->indicies[i] /* / multiplier */)), 'e', mask, multiplier);
+      }
+      // just vanilla feature without dictionary
+      add_feature(ex, (84930177 + 4983107 * delta * (49101 * out[m] + 840178103)), 'e', mask, multiplier);
+    }
+  }
+  // bag of english words and bigrams
+  for (size_t m=0; m<M; m++)
+  { add_feature(ex, (48304733 + 67819371 * (out[m] + 9403285171)), 'e', mask, multiplier);
+    if (m > 0)
+      add_feature(ex, (76271324 + 59012761 * (out[m] + 4893107 * (out[m-1] + 5891076))), 'e', mask, multiplier);
+  }
+}
+  
+void add_alignment_features(gen_data& G, example&ex, size_t multiplier, size_t mask, char ns, size_t N, action a, action last_a)
+{ add_feature(ex, (7341759 + 43831940 * ((int)a + 1)),               ns, mask, multiplier);
+  add_feature(ex, (4319041 + 93183149 * ((int)a - (int)last_a)),     ns, mask, multiplier);
+  add_feature(ex, (8902137 + 38123073 * (a > last_a)),               ns, mask, multiplier);
+  add_feature(ex, (9403183 + 94233021 * (G.covered[a])),             ns, mask, multiplier);
+}
   
 action predict_alignment(Search::search& S, gen_data& G, vector<example*>& ec, size_t m, action last_a, vector<action>& out)
-{ size_t N = ec.size();
+{ size_t N = min(ec.size(), max_input_length);
   Search::predictor& P = *G.P;
   reset_learner(P, 0);
   P.set_tag(2*m+1).set_input(S.ldf_example(), N).set_condition_range(2*m, S.get_history_length(), 'h');
@@ -784,7 +824,7 @@ action predict_alignment(Search::search& S, gen_data& G, vector<example*>& ec, s
   uint64_t multiplier = vw_obj.wpp << vw_obj.reg.stride_shift;
   
   set<size_t>* oracle = nullptr;
-  if ((G.reference != nullptr) && (G.oracle_alignment || S.predictNeedsReference()))
+  if (true || ((G.reference != nullptr) && (G.oracle_alignment || S.predictNeedsReference())))
   { oracle = alignment_oracle(G);
     //cerr << "oracle = {"; for (auto i : *oracle) cerr << ' ' << i; cerr << " }" << endl;
   }
@@ -805,12 +845,43 @@ action predict_alignment(Search::search& S, gen_data& G, vector<example*>& ec, s
       VW::clear_example_data(ex);
       VW::copy_example_data(false, &ex, ec[a]);
       ex.weight = 1.;
+      ex.indices.push_back((size_t)'c');
       ex.indices.push_back((size_t)'p');
-      add_all_features(ex, *ec[last_a], 'p', mask, multiplier, 4390197);
-      add_feature(ex, multiplier * (4319041 + ((int)a - (int)last_a)), 'p', mask, multiplier);
-      add_feature(ex, multiplier * (8902137 + (a > last_a)),           'p', mask, multiplier);
-      add_feature(ex, multiplier * (9403183 + (G.covered[a])),         'p', mask, multiplier);
-      add_feature(ex, multiplier * (8590137 + ((int)N - (int)out.size())),        'p', mask, multiplier);
+      ex.indices.push_back((size_t)'a');
+      ex.indices.push_back((size_t)'e');
+      add_alignment_features(G, ex, multiplier, mask, 'a', N, a, last_a);
+      add_feature(ex, (8590137 + 31510937 * ((int)N - (int)out.size())), 'a', mask, multiplier);
+      // features of previously translated word
+      add_all_features(ex, *ec[last_a], 'p', mask, multiplier, 94031871);
+      // features of current output
+      add_output_features(G, ex, multiplier, mask, out);
+      // coverage features
+      size_t num_uncovered_l = 0;
+      size_t num_uncovered_r = 0;
+      for (size_t i=1; i<N; i++)
+        if (G.covered[i] == 0)
+        { if (i < a) num_uncovered_l++;
+          else       num_uncovered_r++;
+        }
+      add_feature(ex, 43810931788391, 'c', mask, multiplier, num_uncovered_l);
+      add_feature(ex, 95428413789137, 'c', mask, multiplier, num_uncovered_r);
+      add_feature(ex, 17328943178951, 'c', mask, multiplier, G.covered[a]);
+      if (a > 1) add_feature(ex, 9833183017, 'c', mask, multiplier, G.covered[a-1]);
+      if (a < N-1) add_feature(ex, 89501347583, 'c', mask, multiplier, G.covered[a+1]);
+      // cheating feature
+      /*
+      if ((oracle != nullptr) && (oracle->find(a) != oracle->end()))
+      { add_feature(ex, 324802, 'c', mask, multiplier, 1.);
+        //cerr << "cheating feature added to " << a << endl;
+      } //else
+        add_feature(ex, 324802, 'c', mask, multiplier, -1.);
+      */
+      
+      size_t new_count = 0;
+      float new_weight = 0.f;
+      INTERACTIONS::eval_count_of_generated_ft(vw_obj, ex, new_count, new_weight);
+      ex.num_features += new_count;
+      ex.total_sum_feat_sq += new_weight;
     }
     S.ldf_set_label(a, a+1, 0.);
 
@@ -839,7 +910,7 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
   uint64_t mask = S.get_mask();
   uint64_t multiplier = vw_obj.wpp << vw_obj.reg.stride_shift;
   
-  size_t N = ec.size();
+  size_t N = min(ec.size(), max_input_length);
   Search::predictor& P = *G.P;
   example& ex = * S.ldf_example(0);
   reset_learner(P, 1);
@@ -861,52 +932,27 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
     if (a != 0)
     { // dont add neighborhood words for null alignment
       if (a > 0)   add_all_features(ex, *ec[a-1], 'l', mask, multiplier, 48931043, false, 0.5);
-      else         add_feature(ex, multiplier * (48931043 + 483910741), 'l', mask, multiplier);
+      else         add_feature(ex, (48931043 + 483910741), 'l', mask, multiplier);
       if (a > 1)   add_all_features(ex, *ec[a-2], 'j', mask, multiplier, 148931043, false, 0.5);
-      else         add_feature(ex, multiplier * (148931043 + 483910741), 'j', mask, multiplier);
+      else         add_feature(ex, (148931043 + 483910741), 'j', mask, multiplier);
       if (a < N-1) add_all_features(ex, *ec[a+1], 'r', mask, multiplier, 9831487, false, 0.5);
-      else         add_feature(ex, multiplier * (9831487 + 483910741), 'l', mask, multiplier);
+      else         add_feature(ex, (9831487 + 483910741), 'l', mask, multiplier);
       if (a < N-2) add_all_features(ex, *ec[a+2], 's', mask, multiplier, 19831487, false, 0.5);
-      else         add_feature(ex, multiplier * (19831487 + 483910741), 's', mask, multiplier);
+      else         add_feature(ex, (19831487 + 483910741), 's', mask, multiplier);
     }
     for (size_t n=0; n<N; n++)
       add_all_features(ex, *ec[n], 'b', mask, multiplier, 3489101, false, 0.5 /* * exp(0. - G.covered[n]) */ / (float)N);
     // features of previously translated word
     add_all_features(ex, *ec[last_a], 'q', mask, multiplier, 94031871);
-    add_feature(ex, multiplier * (7341759 + 43831940 * ((int)a + 1)), 'p', mask, multiplier);
-    add_feature(ex, multiplier * (4319041 + 93183149 * ((int)a - (int)last_a)), 'p', mask, multiplier);
-    add_feature(ex, multiplier * (8902137 + 38123073 * (a > last_a)),           'p', mask, multiplier);
-    add_feature(ex, multiplier * (9403183 + 94233021 * (G.covered[a])),         'p', mask, multiplier);
-    add_feature(ex, multiplier * (8590137 + 31510937 * ((int)N - (int)out.size())),        'p', mask, multiplier);
-
+    // alignment features
+    add_alignment_features(G, ex, multiplier, mask, 'p', N, a, last_a);
+    add_feature(ex, (8590137 + 31510937 * ((int)N - (int)out.size())), 'a', mask, multiplier);
     // previous english context
-    size_t M = out.size();
-    for (size_t delta=1; delta<=3; delta++)
-    { int m = (int)M-(int)delta;
-      if (m < 0)
-        add_feature(ex, multiplier * (84930177 + 4983107 * delta), 'e', mask, multiplier);
-      else 
-      { // there in an output word at m
-        if (out[m] < G.en_features.size())
-        { features* ff = G.en_features[out[m]];
-          if (ff != nullptr)
-            for (size_t i=0; i<ff->indicies.size(); i++)
-              add_feature(ex, multiplier * (84930177 + 493107 * delta * (49101 * ff->indicies[i] /* / multiplier */)), 'e', mask, multiplier);
-        }
-        // just vanilla feature without dictionary
-        add_feature(ex, multiplier * (84930177 + 4983107 * delta * (49101 * out[m] + 840178103)), 'e', mask, multiplier);
-      }
-    }
-    // bag of english words and bigrams
-    for (size_t m=0; m<M; m++)
-    { add_feature(ex, multiplier * (48304733 + 67819371 * (out[m] + 9403285171)), 'e', mask, multiplier);
-      if (m > 0)
-        add_feature(ex, multiplier * (76271324 + 59012761 * (out[m] + 4893107 * (out[m-1] + 5891076))), 'e', mask, multiplier);
-    }
+    add_output_features(G, ex, multiplier, mask, out);
   
     // cheating features:
     //for (action w : G.reference->next_actions())
-    //  add_feature(ex, multiplier * (4890137 + w), 'p', mask, multiplier);
+    //  add_feature(ex, (4890137 + w), 'p', mask, multiplier);
 
     size_t new_count = 0;
     float new_weight = 0.f;
@@ -963,7 +1009,7 @@ void run(Search::search& S, vector<example*>& ec)
   G.P = new Search::predictor(S, (ptag)0);
   get_oracle(G, ec);
   
-  size_t N = ec.size();
+  size_t N = min(ec.size(), max_input_length);
   size_t M = max(5, min(G.max_output_length, (size_t)( G.max_length_ratio * N )));
   action last_a = 0;   // assume that example[0] is padding <s>
   vector<action> out;

@@ -1100,6 +1100,8 @@ action single_prediction_notLDF(search_private& priv, example& ec, int policy, c
   return act;
 }
 
+  //void my_print_feature_info(action& a, float v, uint64_t idx) { cerr << "  " << disp(a) << disp(v) << disp(idx) << endl; }
+  
 action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, int policy, float& a_cost, action override_action)    // if override_action != -1, then we return it as the action and a_cost is set to the appropriate cost for that action
 { bool need_partial_predictions = need_memo_foreach_action(priv) || (priv.metaoverride && priv.metaoverride->_foreach_action) || (override_action != (action)-1);
 
@@ -1118,7 +1120,7 @@ action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, 
   { this_cache = new v_array<action_cache>();
     *this_cache = v_init<action_cache>();
   }
-
+  vw& all = *priv.all;
   for (action a= (uint32_t)start_K; a<ec_cnt; a++)
   { cdbg << "== single_prediction_LDF a=" << a << "==" << endl;
     if (start_K > 0)
@@ -1133,7 +1135,8 @@ action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, 
     if (priv.global_is_mixed_ldf) priv.empty_example->skip_reduction_layer = 2;
     priv.base_learner->predict(*priv.empty_example, policy);
 
-    cdbg << "partial_prediction[" << a << "] = " << ecs[a].partial_prediction << endl;
+    //GD::foreach_feature<action, uint64_t, my_print_feature_info>(all, ecs[a], a);
+    //cerr << "partial_prediction[" << a << "] = " << ecs[a].partial_prediction << endl;
 
     if (override_action != (action)-1)
     { if (a == override_action)
@@ -1280,7 +1283,7 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
       for (size_t i=0; i<losses.cs.costs.size(); i++) min_loss = MIN(min_loss, losses.cs.costs[i].x);
     for (size_t i=0; i<losses.cs.costs.size(); i++) losses.cs.costs[i].x = (losses.cs.costs[i].x - min_loss) * weight;
   }
-  cdbg << "losses = ["; for (size_t i=0; i<losses.cs.costs.size(); i++) cdbg << ' ' << losses.cs.costs[i].class_index << ':' << losses.cs.costs[i].x; cdbg << " ], min_loss=" << min_loss << endl;
+  //cerr << "losses = ["; for (size_t i=0; i<losses.cs.costs.size(); i++) cerr << ' ' << losses.cs.costs[i].class_index << ':' << losses.cs.costs[i].x; cerr << " ], min_loss=" << min_loss << endl;
 
   priv.total_example_t += 1.;   // TODO: should be max-min
 
