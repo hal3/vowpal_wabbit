@@ -52,7 +52,7 @@ class Reference // interface
 class IncrementalED : public Reference
 {
 public:
-  IncrementalED(vector<action>& target, action eos=1, bool soft_loss=false, bool verify=false, size_t subst_cost=1, size_t ins_cost=1, size_t del_cost=1)
+  IncrementalED(vector<action>& target, action eos=1, bool soft_loss=false, bool verify=false, size_t subst_cost=9, size_t ins_cost=10, size_t del_cost=10)
       : target(target), subst_cost(subst_cost), ins_cost(ins_cost), del_cost(del_cost), N(target.size()), eos(eos), verify(verify), soft_loss(soft_loss)
   { prev_row = new size_t[N+1];
     cur_row  = new size_t[N+1];
@@ -549,6 +549,7 @@ struct gen_data
   //IncrementalED* reference; // at training time, for oracle
   Reference* reference; // at training time, for oracle
   vector<size_t> align_out_to_in; // at training time, if alignments are available, align_out_to_in[m] for m in output gives n in input such that n <-> m, or n=0 if none
+  vector<size_t> align_in_to_word; // reverse of above, but to WORD id not to position id
   size_t max_output_length;
   bool oracle_alignment;
   bool oracle_translation;
@@ -562,6 +563,7 @@ struct gen_data
   bool soft_loss;
   bool super_greedy;
   bool optimize_bleu;
+  bool show_alignments;
   Search::predictor* P; // cached predictor for speed
 
   gen_data(size_t _K) :
@@ -580,6 +582,7 @@ struct gen_data
       soft_loss(false),
       super_greedy(false),
       optimize_bleu(false),
+      show_alignments(false),
       P(nullptr)
   {}
 };
@@ -609,6 +612,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
       ("generate_action_costs", "use action consts instead of binary costs")
       ("generate_super_greedy", "do completely greedy rollouts")
       ("generate_optimize_blue", "optimize bleu (instead of edit distance) -- currently not really working")
+      ("generate_show_alignments", "show alignments in output")
       ("generate_output_dictionary", po::value<string>(), "dictionary that maps output ids to output words");
   add_options(vw_obj);
 
@@ -621,6 +625,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   G.optimize_bleu = G.super_greedy || (vm.count("generate_optimize_blue") > 0);
   G.soft_loss = vm.count("generate_soft_loss") > 0;
   G.action_costs = (vm.count("generate_action_costs") > 0) || G.soft_loss;
+  G.show_alignments = vm.count("generate_show_alignments") > 0;
   
   if ((vw_obj.namespace_dictionaries['e'].size() > 0) && (G.en_dict != nullptr))
   { for (size_t i=0; i<G.en_dict->size(); ++i)
@@ -685,6 +690,7 @@ void get_oracle(gen_data& G, vector<example*>& ec)
     G.reference = nullptr;
   }
   G.align_out_to_in.clear();
+  G.align_in_to_word.clear();
   
   if (ec.size() == 0) return;
   v_array<CS::wclass>& lab = ec[0]->l.cs.costs;
@@ -705,8 +711,17 @@ void get_oracle(gen_data& G, vector<example*>& ec)
     G.reference = new IncrementalED(target, G.eos, G.soft_loss);
   
   if (has_costs)
-    for (CS::wclass& wc : lab)
-      G.align_out_to_in.push_back((size_t) wc.x);
+    for (size_t i=0; i<lab.size(); i++)
+    { size_t a = (size_t)lab[i].x;
+      G.align_out_to_in.push_back(a);
+      if (G.show_alignments)
+      { while (G.align_in_to_word.size() <= a)
+          G.align_in_to_word.push_back(G.oov);
+        G.align_in_to_word[a] = (a>0) ? (action)lab[i].class_index : 0;
+      }
+    }
+      //for (CS::wclass& wc : lab)
+      //G.align_out_to_in.push_back((size_t) wc.x);
 
   if (G.verify_alignment)
   { for (size_t i=0; i<target.size(); i++)
@@ -843,22 +858,26 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
     ex.indices.push_back((size_t)'b');  // bag of words context
     ex.indices.push_back((size_t)'e');  // previous english output context
     // features of neighboring words
-    if (a > 0)   add_all_features(ex, *ec[a-1], 'l', mask, multiplier, 48931043, false, 0.5);
-    else         add_feature(ex, multiplier * (48931043 + 483910741), 'l', mask, multiplier);
-    if (a > 1)   add_all_features(ex, *ec[a-2], 'j', mask, multiplier, 148931043, false, 0.5);
-    else         add_feature(ex, multiplier * (148931043 + 483910741), 'j', mask, multiplier);
-    if (a < N-1) add_all_features(ex, *ec[a+1], 'r', mask, multiplier, 9831487, false, 0.5);
-    else         add_feature(ex, multiplier * (9831487 + 483910741), 'l', mask, multiplier);
-    if (a < N-2) add_all_features(ex, *ec[a+2], 's', mask, multiplier, 19831487, false, 0.5);
-    else         add_feature(ex, multiplier * (19831487 + 483910741), 's', mask, multiplier);
+    if (a != 0)
+    { // dont add neighborhood words for null alignment
+      if (a > 0)   add_all_features(ex, *ec[a-1], 'l', mask, multiplier, 48931043, false, 0.5);
+      else         add_feature(ex, multiplier * (48931043 + 483910741), 'l', mask, multiplier);
+      if (a > 1)   add_all_features(ex, *ec[a-2], 'j', mask, multiplier, 148931043, false, 0.5);
+      else         add_feature(ex, multiplier * (148931043 + 483910741), 'j', mask, multiplier);
+      if (a < N-1) add_all_features(ex, *ec[a+1], 'r', mask, multiplier, 9831487, false, 0.5);
+      else         add_feature(ex, multiplier * (9831487 + 483910741), 'l', mask, multiplier);
+      if (a < N-2) add_all_features(ex, *ec[a+2], 's', mask, multiplier, 19831487, false, 0.5);
+      else         add_feature(ex, multiplier * (19831487 + 483910741), 's', mask, multiplier);
+    }
     for (size_t n=0; n<N; n++)
       add_all_features(ex, *ec[n], 'b', mask, multiplier, 3489101, false, 0.5 /* * exp(0. - G.covered[n]) */ / (float)N);
     // features of previously translated word
     add_all_features(ex, *ec[last_a], 'q', mask, multiplier, 94031871);
-    add_feature(ex, multiplier * (4319041 + ((int)a - (int)last_a)), 'p', mask, multiplier);
-    add_feature(ex, multiplier * (8902137 + (a > last_a)),           'p', mask, multiplier);
-    add_feature(ex, multiplier * (9403183 + (G.covered[a])),         'p', mask, multiplier);
-    add_feature(ex, multiplier * (8590137 + ((int)N - (int)out.size())),        'p', mask, multiplier);
+    add_feature(ex, multiplier * (7341759 + 43831940 * ((int)a + 1)), 'p', mask, multiplier);
+    add_feature(ex, multiplier * (4319041 + 93183149 * ((int)a - (int)last_a)), 'p', mask, multiplier);
+    add_feature(ex, multiplier * (8902137 + 38123073 * (a > last_a)),           'p', mask, multiplier);
+    add_feature(ex, multiplier * (9403183 + 94233021 * (G.covered[a])),         'p', mask, multiplier);
+    add_feature(ex, multiplier * (8590137 + 31510937 * ((int)N - (int)out.size())),        'p', mask, multiplier);
 
     // previous english context
     size_t M = out.size();
@@ -910,19 +929,32 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
 
 void print_word(gen_data& G, std::stringstream& out, action w)
 { if (G.en_dict == nullptr)
-    out << w << ' ';
+    out << w;
   else if (w < G.en_dict->size())
-    out << (*G.en_dict)[w] << ' ';
+    out << (*G.en_dict)[w];
   else
-    out << "*OOV* ";
+    out << "*OOV*";
+}
+
+void print_word_and_alignment(gen_data& G, std::stringstream& out, action w, action a)
+{ print_word(G, out, w);
+  if (G.show_alignments)
+  { out << ':' << a << ':';
+    if (a < G.align_in_to_word.size())
+      print_word(G, out, G.align_in_to_word[a]);
+    else
+      out << "???";
+  }
+  
+  out << ' ';
 }
 
 void setup(Search::search& S, vector<example*>& ec)
-{ gen_data& G = *S.get_task_data<gen_data>();
+{ //gen_data& G = *S.get_task_data<gen_data>();
 }
 
 void takedown(Search::search& S, vector<example*>& ec)
-{ gen_data& G = *S.get_task_data<gen_data>();
+{ //gen_data& G = *S.get_task_data<gen_data>();
 }
 
 void run(Search::search& S, vector<example*>& ec)
@@ -966,7 +998,7 @@ void run(Search::search& S, vector<example*>& ec)
     last_a = a;
 
     if (S.output().good())
-      print_word(G, S.output(), w);
+      print_word_and_alignment(G, S.output(), w, a);
     //S.output() << w << ':' << a << ' ';
   }
   //if (S.output().good()) S.output() << N << '_' << M << '_' << out.size();

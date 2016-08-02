@@ -94,7 +94,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
   uint32_t pred_leaf_lo1 = 0, pred_leaf_hi1 = 0;
   uint32_t pred_leaf_lo2 = 0, pred_leaf_hi2 = 0;
   if (! hsm.redundant)
-  { uint32_t top = min(hsm.leaf, hsm.K - hsm.leaf * pred0 + 1);
+  { uint32_t top = min(hsm.leaf, hsm.K - hsm.leaf * pred0);
     base.multipredict(ec, hsm.root + hsm.leaf * pred0, top, hsm.pred_leaf, false);
     //cerr << "hsm.pred" << pred0 << " ="; for (size_t i=0; i<top; i++) cerr << ' ' << hsm.pred[i].scalar; cerr << endl;
     for (uint32_t i=1; i<top; i++)
