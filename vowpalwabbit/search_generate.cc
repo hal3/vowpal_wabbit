@@ -38,9 +38,8 @@ unsigned int levenshtein_distance(const vector<action>& s1, const vector<action>
   return prevCol[len2];
 }
 
-class Reference
+class Reference // interface
 { public:
-  //Reference() {}
   virtual void append(action a) = 0;
   virtual void append(vector<action>& s) = 0;
   virtual set<action>& next_actions() = 0;
@@ -50,7 +49,7 @@ class Reference
   virtual ~Reference() {}
 };
   
-class IncrementalED : Reference
+class IncrementalED : public Reference
 {
 public:
   IncrementalED(vector<action>& target, action eos=1, bool soft_loss=false, bool verify=false, size_t subst_cost=1, size_t ins_cost=1, size_t del_cost=1)
@@ -206,7 +205,7 @@ std::ostream& operator<<(std::ostream& os, const counter& A)
   return os;
 }
 
-class IncrementalBleu
+class IncrementalBleu : public Reference
 {
 public:
   IncrementalBleu(vector<action>& target, action vocab_size, bool super_greedy, action eos=1)
@@ -224,6 +223,8 @@ public:
     _cache_updated = false;
     //cerr << "IncrementalBleu " << disp(target) << endl;
   }
+
+  ~IncrementalBleu() {}
 
   void append(action a)
   { //cerr << "append " << disp(a) << endl;
@@ -546,7 +547,7 @@ struct gen_data
   float max_length_ratio;  // max # output = max_length_ratio * # input, default 2
   action eos, oov;  // eos id, default 1; oov default 2
   //IncrementalED* reference; // at training time, for oracle
-  IncrementalBleu* reference; // at training time, for oracle
+  Reference* reference; // at training time, for oracle
   vector<size_t> align_out_to_in; // at training time, if alignments are available, align_out_to_in[m] for m in output gives n in input such that n <-> m, or n=0 if none
   size_t max_output_length;
   bool oracle_alignment;
@@ -560,6 +561,7 @@ struct gen_data
   bool verify_alignment;
   bool soft_loss;
   bool super_greedy;
+  bool optimize_bleu;
   Search::predictor* P; // cached predictor for speed
 
   gen_data(size_t _K) :
@@ -577,6 +579,7 @@ struct gen_data
       verify_alignment(false), // need audit
       soft_loss(false),
       super_greedy(false),
+      optimize_bleu(false),
       P(nullptr)
   {}
 };
@@ -605,6 +608,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
       ("generate_soft_loss", "use soft loss instead of hard edit distance loss")
       ("generate_action_costs", "use action consts instead of binary costs")
       ("generate_super_greedy", "do completely greedy rollouts")
+      ("generate_optimize_blue", "optimize bleu (instead of edit distance) -- currently not really working")
       ("generate_output_dictionary", po::value<string>(), "dictionary that maps output ids to output words");
   add_options(vw_obj);
 
@@ -614,6 +618,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   if (vm.count("generate_output_dictionary") > 0)
     G.en_dict = read_english_dictionary(vm["generate_output_dictionary"].as<string>());
   G.super_greedy = vm.count("generate_super_greedy") > 0;
+  G.optimize_bleu = G.super_greedy || (vm.count("generate_optimize_blue") > 0);
   G.soft_loss = vm.count("generate_soft_loss") > 0;
   G.action_costs = (vm.count("generate_action_costs") > 0) || G.soft_loss;
   
@@ -694,8 +699,11 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   }
   target.pop_back();
   //cerr << "target = "; for (auto i : target) cerr << i << ' '; cerr << endl;
-  //G.reference = new IncrementalED(target, G.eos, G.soft_loss);
-  G.reference = new IncrementalBleu(target, G.K, G.super_greedy, G.eos);
+  if (G.optimize_bleu)
+    G.reference = new IncrementalBleu(target, G.K, G.super_greedy, G.eos);
+  else
+    G.reference = new IncrementalED(target, G.eos, G.soft_loss);
+  
   if (has_costs)
     for (CS::wclass& wc : lab)
       G.align_out_to_in.push_back((size_t) wc.x);
