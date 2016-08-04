@@ -47,3 +47,14 @@ static inline uint32_t fmix(uint32_t h)
 const uint32_t hash_base = 0;
 
 uint64_t uniform_hash(const void *key, size_t length, uint64_t seed);
+
+//-----------------------------------------------------------------------------
+// compile time hash, thanks to Sam Hocevar
+//   http://lolengine.net/blog/2011/12/20/cpp-constant-string-hash
+#define __CTHASH1(s,i,x)   (x*65599u+(uint8_t)s[(i)<strlen(s)?strlen(s)-1-(i):strlen(s)])
+#define __CTHASH4(s,i,x)   __CTHASH1(s,i,__CTHASH1(s,i+1,__CTHASH1(s,i+2,__CTHASH1(s,i+3,x))))
+#define __CTHASH16(s,i,x)  __CTHASH4(s,i,__CTHASH4(s,i+4,__CTHASH4(s,i+8,__CTHASH4(s,i+12,x))))
+#define __CTHASH64(s,i,x)  __CTHASH16(s,i,__CTHASH16(s,i+16,__CTHASH16(s,i+32,__CTHASH16(s,i+48,x))))
+#define __CTHASH256(s,i,x) __CTHASH64(s,i,__CTHASH64(s,i+64,__CTHASH64(s,i+128,__CTHASH64(s,i+192,x))))
+#define HASHSTR(s)         ((uint32_t)(__CTHASH256(s,0,0)^(__CTHASH256(s,0,0)>>16)))
+

@@ -709,7 +709,10 @@ template<class T> bool array_contains(T target, const T*A, size_t n)
 
 // priv.learn_condition_on_act or priv.condition_on_actions
 void add_example_conditioning(search_private& priv, example& ec, size_t condition_on_cnt, const char* condition_on_names, action_repr* condition_on_actions)
-{ if (condition_on_cnt == 0) return;
+{ if (condition_on_cnt == 0)
+  { //cerr << "not conditioning" << endl;
+    return;
+  }
 
   uint64_t extra_offset=0;
   if (priv.is_ldf)
@@ -731,6 +734,8 @@ void add_example_conditioning(search_private& priv, example& ec, size_t conditio
       // we're going to add features for the ngram condition_on_actions[i .. i+N]
       char name = condition_on_names[i+n];
       fid = fid * 328901 + 71933 * ((condition_on_actions[i+n].a + 349101) * (name + 38490137));
+
+      cdbg << "condition label " << ec.l.cs.costs[0].class_index << " on position " << i << "+" << n << ", name " << name << " action " << condition_on_actions[i+n].a << endl;
 
       priv.dat_new_feature_ec  = &ec;
       priv.dat_new_feature_idx = fid * quadratic_constant;
@@ -1100,7 +1105,7 @@ action single_prediction_notLDF(search_private& priv, example& ec, int policy, c
   return act;
 }
 
-  //void my_print_feature_info(action& a, float v, uint64_t idx) { cerr << "  " << disp(a) << disp(v) << disp(idx) << endl; }
+void my_print_feature_info(action& a, float v, uint64_t idx) { cerr << idx << ':' << v << ' '; }
   
 action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, int policy, float& a_cost, action override_action)    // if override_action != -1, then we return it as the action and a_cost is set to the appropriate cost for that action
 { bool need_partial_predictions = need_memo_foreach_action(priv) || (priv.metaoverride && priv.metaoverride->_foreach_action) || (override_action != (action)-1);
@@ -1135,8 +1140,9 @@ action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, 
     if (priv.global_is_mixed_ldf) priv.empty_example->skip_reduction_layer = 2;
     priv.base_learner->predict(*priv.empty_example, policy);
 
-    //GD::foreach_feature<action, uint64_t, my_print_feature_info>(all, ecs[a], a);
-    //cerr << "partial_prediction[" << a << "] = " << ecs[a].partial_prediction << endl;
+    // cerr << "features[" << a << "] = { ";
+    // GD::foreach_feature<action, uint64_t, my_print_feature_info>(all, ecs[a], a);
+    // cerr << "} -> " << ecs[a].partial_prediction << ' ' << (((a == start_K) || (ecs[a].partial_prediction < best_prediction)) ? '*' : ' ') << endl;
 
     if (override_action != (action)-1)
     { if (a == override_action)
@@ -1625,7 +1631,11 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
       setup_learner_id(priv, learner_id);
       ensure_size(priv.condition_on_actions, condition_on_cnt);
       for (size_t i=0; i<condition_on_cnt; i++)
-        priv.condition_on_actions[i] = ((1 <= condition_on[i]) && (condition_on[i] < priv.ptag_to_action.size())) ? priv.ptag_to_action[condition_on[i]] : 0;
+      { priv.condition_on_actions[i] = ((1 <= condition_on[i]) && (condition_on[i] < priv.ptag_to_action.size())) ? priv.ptag_to_action[condition_on[i]] : 0;
+        // cerr << "condition_on_actions[" << i << "] = " << priv.condition_on_actions[i].a << " { " << disp(condition_on[i]);
+        // if (condition_on[i] < priv.ptag_to_action.size()) cerr << disp(priv.ptag_to_action[condition_on[i]].a);
+        // cerr << " }" << endl;
+      }
 
       bool not_test = priv.all->training && !ecs[0].test_only;
 
@@ -2985,8 +2995,8 @@ action search::predictLDF(example* ecs, size_t ec_cnt, ptag mytag, const action*
         delete priv->ptag_to_action[mytag].repr;
       }
     } // TODO: passthrough representation
-    cdbg << "push_at (LDF) " << mytag << " <- " << a << endl;
     push_at(priv->ptag_to_action, action_repr(ecs[a].l.cs.costs[0].class_index, &(priv->last_action_repr)), mytag);
+    cdbg << "ptag_to_action[" << mytag << "] <- " << ecs[a].l.cs.costs[0].class_index << endl;
   } else
     cdbg << "warning: no tag to push_at (LDF)!" << endl;
   if (priv->auto_hamming_loss)
@@ -3071,6 +3081,7 @@ void search::set_num_learners(size_t num_learners)
 }
 
 bool search::is_test() { return this->priv->state == INIT_TEST; }
+bool search::is_get_truth_string() { return this->priv->state == GET_TRUTH_STRING; }
 bool search::at_learning_point()
 {
   return priv->state == LEARN &&

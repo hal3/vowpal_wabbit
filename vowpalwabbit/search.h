@@ -177,6 +177,7 @@ struct search
 
   // check to see if we're running in test mode
   bool is_test();
+  bool is_get_truth_string();
   bool at_learning_point();
   
   // get the action sequence from the test run (only run if test_only or -t or...)

@@ -13,6 +13,7 @@
 #include "cost_sensitive.h"
 #include "vw.h"
 #include "interactions.h"
+#include "gd.h"
 
 namespace CS=COST_SENSITIVE;
 
@@ -556,6 +557,7 @@ struct gen_data
   size_t max_output_length;
   bool oracle_alignment;
   bool oracle_translation;
+  bool optimistic_translation;
   vector<uint32_t> covered;
   vector<string>* en_dict;
   vector<features*> en_features;
@@ -578,6 +580,7 @@ struct gen_data
       max_output_length(40),
       oracle_alignment(false),
       oracle_translation(false),
+      optimistic_translation(false),
       costs(nullptr),
       action_costs(false),
       remove_oov(true),
@@ -615,6 +618,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
       ("generate_action_costs", "use action consts instead of binary costs")
       ("generate_oracle_alignment", "use oracle alignment (ie cheat and don't predict alignments ourselves)")
       ("generate_oracle_translation", "use oracle translation (ie cheat massively)")
+      ("generate_optimistic_translation", "translate according to gold aligned word (ie cheat somewhat)")
       ("generate_super_greedy", "do completely greedy rollouts")
       ("generate_optimize_blue", "optimize bleu (instead of edit distance) -- currently not really working")
       ("generate_show_alignments", "show alignments in output")
@@ -633,6 +637,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   G.show_alignments = vm.count("generate_show_alignments") > 0;
   G.oracle_alignment = vm.count("generate_oracle_alignment") > 0;
   G.oracle_translation = vm.count("generate_oracle_translation") > 0;
+  G.optimistic_translation = vm.count("generate_optimistic_translation") > 0;
   
   if ((vw_obj.namespace_dictionaries['e'].size() > 0) && (G.en_dict != nullptr))
   { for (size_t i=0; i<G.en_dict->size(); ++i)
@@ -685,7 +690,7 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   //    2:1 3:0 4:2 1:3
   // means that "2" (the first word in the output) is aligned to "1"
   // (the first _real_ word in the input, "in1" above), 3 is unaligned
-  // (:0 .. meaning aligned to the <s>/null token), 4 is aligned to
+  // (:0 .. meaning aligned to the null token), 4 is aligned to
   // in2 and </s> is aligned to in3 (which is presumably </s>)
   //
   // for test examples, leave the label on the first line blank
@@ -721,7 +726,7 @@ void get_oracle(gen_data& G, vector<example*>& ec)
     for (size_t i=0; i<lab.size(); i++)
     { size_t a = (size_t)lab[i].x;
       G.align_out_to_in.push_back(a);
-      if (G.show_alignments)
+      if (G.show_alignments || G.optimistic_translation)
       { while (G.align_in_to_word.size() <= a)
           G.align_in_to_word.push_back(G.oov);
         G.align_in_to_word[a] = (a>0) ? (action)lab[i].class_index : 0;
@@ -785,7 +790,7 @@ void add_output_features(gen_data& G, example&ex, size_t multiplier, size_t mask
   for (size_t delta=1; delta<=3; delta++)
   { int m = (int)M-(int)delta;
     if (m < 0)
-      add_feature(ex, (84930177 + 4983107 * delta), 'e', mask, multiplier);
+      add_feature(ex, HASHSTR("foo") + 4983107 * delta, 'e', mask, multiplier);
     else 
     { // there in an output word at m
       if (out[m] < G.en_features.size())
@@ -812,12 +817,29 @@ void add_alignment_features(gen_data& G, example&ex, size_t multiplier, size_t m
   add_feature(ex, (8902137 + 38123073 * (a > last_a)),               ns, mask, multiplier);
   add_feature(ex, (9403183 + 94233021 * (G.covered[a])),             ns, mask, multiplier);
 }
+
+void my_print_feature_info(action& a, float v, uint64_t idx) { cerr << " ; " << disp(a) << disp(v) << disp(idx); }
+
+#define NullToken 91108
+
+void validate_example_namespaces(example& ec)
+{ // check to make sure all indices are specified
+  std::set<namespace_index> declared_indices;
+  for (namespace_index ns : ec.indices)
+    declared_indices.insert(ns);
   
-action predict_alignment(Search::search& S, gen_data& G, vector<example*>& ec, size_t m, action last_a, vector<action>& out)
+  for (int ns=0; ns<256; ns++)
+    if (ec.feature_space[ns].values.size() > 0)
+      if (declared_indices.find(ns) == declared_indices.end())
+        cerr << "error: example has features in ns '" << (char)ns << "'=" << (int)ns << " but it was not declared!" << endl;
+}
+
+
+action predict_alignment(Search::search& S, gen_data& G, vector<example*>& ec, size_t m, action last_a, action last_nonnull_a, vector<action>& out)
 { size_t N = min(ec.size(), max_input_length);
   Search::predictor& P = *G.P;
   reset_learner(P, 0);
-  P.set_tag(2*m+1).set_input(S.ldf_example(), N).set_condition_range(2*m, S.get_history_length(), 'h');
+  P.set_tag(2*m+1).set_condition_range(2*m, S.get_history_length(), 'H');
 
   vw& vw_obj = S.get_vw_pointer_unsafe();
   uint64_t mask = S.get_mask();
@@ -837,68 +859,100 @@ action predict_alignment(Search::search& S, gen_data& G, vector<example*>& ec, s
     return ret;
   }
 
+  // TODO: keep record of last-non-null-aligned-position
   for (size_t a=0; a<N; a++)
   { // for each word in the input, create an LDF example that corresponds to "align here!"
     if (true || S.predictNeedsExample())
     { example& ex = * S.ldf_example(a);
-      // features are based on ec[last_a] and ec[a], plus last_a vs a
       VW::clear_example_data(ex);
-      VW::copy_example_data(false, &ex, ec[a]);
       ex.weight = 1.;
-      ex.indices.push_back((size_t)'c');
-      ex.indices.push_back((size_t)'p');
-      ex.indices.push_back((size_t)'a');
+      // the word we might be aligning to
+      VW::copy_example_data(false, &ex, ec[a]);
+      ex.indices.push_back((size_t)'P');
+      ex.indices.push_back((size_t)'I');
+      ex.indices.push_back((size_t)'A');
+      ex.indices.push_back((size_t)'L');
+      ex.indices.push_back((size_t)'R');
+      ex.indices.push_back((size_t)'C');
       ex.indices.push_back((size_t)'e');
-      add_alignment_features(G, ex, multiplier, mask, 'a', N, a, last_a);
-      add_feature(ex, (8590137 + 31510937 * ((int)N - (int)out.size())), 'a', mask, multiplier);
-      // features of previously translated word
-      add_all_features(ex, *ec[last_a], 'p', mask, multiplier, 94031871);
+      // the previous word we aligned to, special casing for BOS versus NULL
+      if (out.size() == 0)
+        add_feature(ex, 839183135, 'P', mask, multiplier);
+      if (last_a == NullToken)
+        add_feature(ex, 313857192, 'P', mask, multiplier);
+
+      add_all_features(ex, *ec[last_nonnull_a], 'P', mask, multiplier, 94031871);
+      // the words in between, marked with direction
+      if (a != 0)
+      { for (size_t i=last_nonnull_a+1; i<a; i++)
+          add_all_features(ex, *ec[i], 'I', mask, multiplier, 1839401732);
+        for (size_t i=a+1; i<last_nonnull_a; i++)
+          add_all_features(ex, *ec[i], 'I', mask, multiplier, 940318301);
+      }
+      // add alignment features
+      add_alignment_features(G, ex, multiplier, mask, 'A', N, a, last_a);
+      // add neighbor features
+      if (a >= 2)
+        add_all_features(ex, *ec[a-1], 'L', mask, multiplier, 3941831764);
+      if (a < N-1)
+        add_all_features(ex, *ec[a+1], 'R', mask, multiplier, 781204651);
       // features of current output
       add_output_features(G, ex, multiplier, mask, out);
       // coverage features
-      size_t num_uncovered_l = 0;
-      size_t num_uncovered_r = 0;
-      for (size_t i=1; i<N; i++)
-        if (G.covered[i] == 0)
-        { if (i < a) num_uncovered_l++;
-          else       num_uncovered_r++;
-        }
-      add_feature(ex, 43810931788391, 'c', mask, multiplier, num_uncovered_l);
-      add_feature(ex, 95428413789137, 'c', mask, multiplier, num_uncovered_r);
-      add_feature(ex, 17328943178951, 'c', mask, multiplier, G.covered[a]);
-      if (a > 1) add_feature(ex, 9833183017, 'c', mask, multiplier, G.covered[a-1]);
-      if (a < N-1) add_feature(ex, 89501347583, 'c', mask, multiplier, G.covered[a+1]);
+      if (a != 0)
+      { size_t num_uncovered_l = 0;
+        size_t num_uncovered_r = 0;
+        for (size_t i=1; i<N; i++)
+          if (G.covered[i] == 0)
+          { if (i < a) num_uncovered_l++;
+            else       num_uncovered_r++;
+          }
+        add_feature(ex, 43810931788391, 'C', mask, multiplier, num_uncovered_l);
+        add_feature(ex, 95428413789137, 'C', mask, multiplier, num_uncovered_r);
+      }
+      add_feature(ex, 17328943178951, 'C', mask, multiplier, G.covered[a]);
+
       // cheating feature
-      /*
-      if ((oracle != nullptr) && (oracle->find(a) != oracle->end()))
-      { add_feature(ex, 324802, 'c', mask, multiplier, 1.);
-        //cerr << "cheating feature added to " << a << endl;
-      } //else
-        add_feature(ex, 324802, 'c', mask, multiplier, -1.);
-      */
+      //if ((oracle != nullptr) && (oracle->find(a) != oracle->end()))
+      //add_feature(ex, HASHSTR("cheating"), 'C', mask, multiplier, 1.);
       
       size_t new_count = 0;
       float new_weight = 0.f;
       INTERACTIONS::eval_count_of_generated_ft(vw_obj, ex, new_count, new_weight);
       ex.num_features += new_count;
       ex.total_sum_feat_sq += new_weight;
+
+      //validate_example_namespaces(ex);
+      // action tmp = a;
+      // cerr << "ex[" << a << "] = { ";
+      // GD::foreach_feature<action, uint64_t, my_print_feature_info>(vw_obj, ex, tmp);
+      // cerr << " }" << endl;
     }
-    S.ldf_set_label(a, a+1, 0.);
+    action action_name = (a == 0) ? NullToken
+        : (last_a == NullToken) ? a : ((5000 + (int)a - (int)last_a));
+    
+    S.ldf_set_label(a, action_name, 0.);
 
     if ((oracle != nullptr) && (oracle->find(a) != oracle->end()))
-      P.add_oracle(a);
+    { P.add_oracle(a);
+      //cerr << "oracle: " << last_nonnull_a << ':' << last_a << ':' << a << endl;
+    }
   }
   if (oracle != nullptr) delete oracle;
-  
-  action a = P.predict();
+  action a = P.set_input(S.ldf_example(), N).predict();
+  /*
+  if (a != last_a+1)
+     cerr << "+";
+  */
   assert(a >= 0);
-  assert(a <  N);
+  assert(a < N);
+  if (a == 0) a = NullToken;
   return a;
 }
 
-action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t m, action last_a, action a, vector<action>& out)
+action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t m, action last_a, action last_nonnull_a, action a, vector<action>& out)
 {
-  if (G.oracle_translation)
+  if (G.oracle_translation || (G.optimistic_translation && S.is_get_truth_string()))
   { for (action w : G.reference->next_actions())
       return w;
     assert(false);
@@ -906,6 +960,13 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
   //cerr << "       out = "; for (auto i : out) cerr << i << ' '; cerr << endl;
   //cerr << "    oracle = {"; for (auto i : G.reference->next_actions()) cerr << ' ' << i; cerr << " }" << endl;
 
+  if (G.optimistic_translation)
+  { if (a < G.align_in_to_word.size())
+      return G.align_in_to_word[a];
+    else
+      return G.oov;
+  }
+  
   vw& vw_obj = S.get_vw_pointer_unsafe();
   uint64_t mask = S.get_mask();
   uint64_t multiplier = vw_obj.wpp << vw_obj.reg.stride_shift;
@@ -919,17 +980,17 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
   VW::clear_example_data(ex);
   ex.weight = 1.;
   if (false || S.predictNeedsExample())
-  { VW::copy_example_data(false, &ex, ec[a]);
+  { VW::copy_example_data(false, &ex, ec[(a == NullToken) ? 0 : a]);
     ex.indices.push_back((size_t)'l');  // left fr context
     ex.indices.push_back((size_t)'j');  // more left fr context
     ex.indices.push_back((size_t)'r');  // right fr context
     ex.indices.push_back((size_t)'s');  // more right fr context
-    ex.indices.push_back((size_t)'p');  // alignment features
+    ex.indices.push_back((size_t)'a');  // alignment features
     ex.indices.push_back((size_t)'q');  // previous alignment fr context
     ex.indices.push_back((size_t)'b');  // bag of words context
     ex.indices.push_back((size_t)'e');  // previous english output context
     // features of neighboring words
-    if (a != 0)
+    if (a != NullToken)
     { // dont add neighborhood words for null alignment
       if (a > 0)   add_all_features(ex, *ec[a-1], 'l', mask, multiplier, 48931043, false, 0.5);
       else         add_feature(ex, (48931043 + 483910741), 'l', mask, multiplier);
@@ -943,12 +1004,13 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
     for (size_t n=0; n<N; n++)
       add_all_features(ex, *ec[n], 'b', mask, multiplier, 3489101, false, 0.5 /* * exp(0. - G.covered[n]) */ / (float)N);
     // features of previously translated word
-    add_all_features(ex, *ec[last_a], 'q', mask, multiplier, 94031871);
+    add_all_features(ex, *ec[last_nonnull_a], 'q', mask, multiplier, 94031871);
     // alignment features
-    add_alignment_features(G, ex, multiplier, mask, 'p', N, a, last_a);
+    add_alignment_features(G, ex, multiplier, mask, 'a', N, a, last_a);
     add_feature(ex, (8590137 + 31510937 * ((int)N - (int)out.size())), 'a', mask, multiplier);
     // previous english context
     add_output_features(G, ex, multiplier, mask, out);
+    //validate_example_namespaces(ex);
   
     // cheating features:
     //for (action w : G.reference->next_actions())
@@ -985,7 +1047,12 @@ void print_word(gen_data& G, std::stringstream& out, action w)
 void print_word_and_alignment(gen_data& G, std::stringstream& out, action w, action a)
 { print_word(G, out, w);
   if (G.show_alignments)
-  { out << ':' << a << ':';
+  { out << ':';
+    if (a == NullToken)
+      out << '_';
+    else
+      out << a;
+    out << ':';
     if (a < G.align_in_to_word.size())
       print_word(G, out, G.align_in_to_word[a]);
     else
@@ -1012,6 +1079,7 @@ void run(Search::search& S, vector<example*>& ec)
   size_t N = min(ec.size(), max_input_length);
   size_t M = max(5, min(G.max_output_length, (size_t)( G.max_length_ratio * N )));
   action last_a = 0;   // assume that example[0] is padding <s>
+  action last_nonnull_a = 0;
   vector<action> out;
 
   G.covered.clear();
@@ -1022,14 +1090,13 @@ void run(Search::search& S, vector<example*>& ec)
   {
     // we need to produce the mth word, so first we need to pick a
     // place to align to
-    action a = predict_alignment(S, G, ec, m, last_a, out);
+    action a = predict_alignment(S, G, ec, m, last_a, last_nonnull_a, out);
     //cerr << disp(m) << disp(a) << endl;
         
     // now, predict the word id
-    action w = predict_word(S, G, ec, m, last_a, a, out);
+    action w = predict_word(S, G, ec, m, last_a, last_nonnull_a, a, out);
 
     //cerr << disp(w) << endl;
-        
     // check to see if we're done
     if (w == G.eos)
       break;
@@ -1040,7 +1107,10 @@ void run(Search::search& S, vector<example*>& ec)
     
     out.push_back(w);
     
-    G.covered[a]++;
+    if (a != NullToken)
+    { G.covered[a]++;
+      last_nonnull_a = a;
+    }
     last_a = a;
 
     if (S.output().good())
@@ -1055,6 +1125,7 @@ void run(Search::search& S, vector<example*>& ec)
     //cerr << "       out = "; for (auto i : out) cerr << i << ' '; cerr << endl;
     //cerr << "      loss = " << loss << endl;
   }
+  //cerr << endl;
 
   if (G.reference != nullptr)
   { delete G.reference;
