@@ -663,7 +663,7 @@ void initialize(Search::search& S, size_t& num_actions, po::variables_map& vm)
   S.ldf_alloc(max_input_length);
   S.set_label_parser( COST_SENSITIVE::cs_label, [](polylabel&l) -> bool { return l.cs.costs.size() == 0; });
   S.set_options(0
-                | Search::AUTO_CONDITION_FEATURES
+                //| Search::AUTO_CONDITION_FEATURES
                 | Search::NO_CACHING
                 | Search::IS_MIXED_LDF
                 | G.action_costs * Search::ACTION_COSTS
@@ -675,7 +675,7 @@ void finish(Search::search& S)
 }
 
   
-void get_oracle(gen_data& G, vector<example*>& ec)
+void get_oracle(Search::search& S, gen_data& G, vector<example*>& ec)
 { // file format:
   // [output sequence] | <s>
   // | in1
@@ -711,7 +711,8 @@ void get_oracle(gen_data& G, vector<example*>& ec)
   vector<action> target;
   bool has_costs = true;
   for (CS::wclass& wc : lab)
-  { target.push_back(wc.class_index);
+  { //if (S.is_get_truth_string() || (wc.class_index != G.oov)) // only include OOV for truth string
+    target.push_back(wc.class_index);
     if ((wc.x < 0.) || (wc.x >= N))
       has_costs = false;
   }
@@ -787,7 +788,8 @@ void add_all_features(example& ex, example& src, unsigned char tgt_ns, uint64_t 
 
 void add_output_features(gen_data& G, example&ex, size_t multiplier, size_t mask, vector<action>& out)
 { size_t M = out.size();
-  for (size_t delta=1; delta<=3; delta++)
+  size_t ngram = 30498301;
+  for (size_t delta=1; delta<=5; delta++)
   { int m = (int)M-(int)delta;
     if (m < 0)
       add_feature(ex, HASHSTR("foo") + 4983107 * delta, 'e', mask, multiplier);
@@ -802,7 +804,11 @@ void add_output_features(gen_data& G, example&ex, size_t multiplier, size_t mask
       // just vanilla feature without dictionary
       add_feature(ex, (84930177 + 4983107 * delta * (49101 * out[m] + 840178103)), 'e', mask, multiplier);
     }
+    // ngram feature
+    ngram = 4831901 * (ngram + 91001 * ((m >= 0) ? out[m] : 1));
+    add_feature(ex, 98493173 + 13573567 * ngram, 'e', mask, multiplier);
   }
+  
   // bag of english words and bigrams
   for (size_t m=0; m<M; m++)
   { add_feature(ex, (48304733 + 67819371 * (out[m] + 9403285171)), 'e', mask, multiplier);
@@ -810,17 +816,18 @@ void add_output_features(gen_data& G, example&ex, size_t multiplier, size_t mask
       add_feature(ex, (76271324 + 59012761 * (out[m] + 4893107 * (out[m-1] + 5891076))), 'e', mask, multiplier);
   }
 }
+
+#define NullToken 91108
   
-void add_alignment_features(gen_data& G, example&ex, size_t multiplier, size_t mask, char ns, size_t N, action a, action last_a)
+void add_alignment_features(gen_data& G, example&ex, size_t multiplier, size_t mask, char ns, size_t N, action a, action last_a) // TODO: last_nonnull_a
 { add_feature(ex, (7341759 + 43831940 * ((int)a + 1)),               ns, mask, multiplier);
   add_feature(ex, (4319041 + 93183149 * ((int)a - (int)last_a)),     ns, mask, multiplier);
   add_feature(ex, (8902137 + 38123073 * (a > last_a)),               ns, mask, multiplier);
-  add_feature(ex, (9403183 + 94233021 * (G.covered[a])),             ns, mask, multiplier);
+  if (a != NullToken)
+    add_feature(ex, (9403183 + 94233021 * (G.covered[a])),             ns, mask, multiplier);
 }
 
 void my_print_feature_info(action& a, float v, uint64_t idx) { cerr << " ; " << disp(a) << disp(v) << disp(idx); }
-
-#define NullToken 91108
 
 void validate_example_namespaces(example& ec)
 { // check to make sure all indices are specified
@@ -1074,7 +1081,7 @@ void run(Search::search& S, vector<example*>& ec)
 { gen_data& G = *S.get_task_data<gen_data>();
 
   G.P = new Search::predictor(S, (ptag)0);
-  get_oracle(G, ec);
+  get_oracle(S, G, ec);
   
   size_t N = min(ec.size(), max_input_length);
   size_t M = max(5, min(G.max_output_length, (size_t)( G.max_length_ratio * N )));

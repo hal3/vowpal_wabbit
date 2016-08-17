@@ -31,6 +31,8 @@ struct cshsm
   v_array<float> top_costs;
   bool redundant;
   bool filter;
+  uint32_t kbest;
+  v_array< pair<float,uint32_t> > kbest_topk;
 };
 
 /***
@@ -84,16 +86,23 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
   base.multipredict(ec, 0, hsm.root, hsm.pred_root, false);
   //cerr << "hsm.predR ="; for (size_t i=0; i<hsm.root; i++) cerr << ' ' << hsm.pred_root[i].scalar; cerr << endl;
   uint32_t pred0 = 0;
-  for (uint32_t i=1; i<hsm.root; i++)
-    if (hsm.pred_root[i].scalar < hsm.pred_root[pred0].scalar)
+  for (uint32_t i=0; i<hsm.root; i++)
+  { if (hsm.pred_root[i].scalar < hsm.pred_root[pred0].scalar)
       pred0 = i;
+    if (hsm.kbest > 0)
+    { hsm.kbest_topk[i].first = hsm.pred_root[i].scalar;
+      hsm.kbest_topk[i].second = i;
+    }
+  }
+  if (hsm.kbest > 0)
+    std::sort(hsm.kbest_topk.begin(), hsm.kbest_topk.begin() + hsm.root);
 
   uint32_t prediction = 0;
   
   uint32_t pred1 = 0;
   uint32_t pred_leaf_lo1 = 0, pred_leaf_hi1 = 0;
   uint32_t pred_leaf_lo2 = 0, pred_leaf_hi2 = 0;
-  if (! hsm.redundant)
+  if ((! hsm.redundant) && (hsm.kbest == 0))
   { uint32_t top = min(hsm.leaf, hsm.K - hsm.leaf * pred0);
     base.multipredict(ec, hsm.root + hsm.leaf * pred0, top, hsm.pred_leaf, false);
     //cerr << "hsm.pred" << pred0 << " ="; for (size_t i=0; i<top; i++) cerr << ' ' << hsm.pred[i].scalar; cerr << endl;
@@ -102,6 +111,32 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         pred1 = i;
     prediction = pred0 * hsm.leaf + pred1 + 1;
     assert(prediction <= hsm.K);
+    assert(prediction > 0);
+  } else if ((! hsm.redundant) && (hsm.kbest > 0))
+  {
+    float pred1_val = FLT_MAX;
+    for (size_t k=0; k<hsm.kbest; k++)
+    { uint32_t predk = hsm.kbest_topk[k].second;
+      float predk_v = hsm.kbest_topk[k].first;
+      //cerr << hsm.kbest_topk[k].first << ": ";
+      uint32_t top = min(hsm.leaf, hsm.K - hsm.leaf * predk);
+      base.multipredict(ec, hsm.root + hsm.leaf * predk, top, hsm.pred_leaf, false);
+      //cerr << "hsm.pred" << pred0 << " ="; for (size_t i=0; i<top; i++) cerr << ' ' << hsm.pred[i].scalar; cerr << endl;
+      for (uint32_t i=0; i<top; i++)
+      { //cerr << ' ' << hsm.pred_leaf[i].scalar;
+        if (hsm.pred_leaf[i].scalar + predk_v < pred1_val)
+        { pred1 = i;
+          pred1_val = hsm.pred_leaf[i].scalar + predk_v;
+          prediction = predk * hsm.leaf + pred1 + 1;
+          //cerr << '*';
+          //if (k > 0) cerr << "WOW!";
+        }
+      }
+      //cerr << endl;
+    }
+    //cerr << endl;
+    assert(prediction <= hsm.K);
+    assert(prediction > 0);
   } else
   { // redundant representation needs a bit more work. except for
     // first L/2 classes, we need to make L predictions, starting
@@ -135,6 +170,8 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
       else
         prediction = hsm.leaf/2 * pred0 + (pred1 - hsm.leaf/2) + 1;
     }
+    assert(prediction <= hsm.K);
+    assert(prediction > 0);
   }
   //cerr << disp(pred0) << disp(pred1) << disp(prediction) << endl;
   if (is_learn) {
@@ -191,11 +228,24 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         { new_pred0_v = ec.partial_prediction;
           new_pred0   = i;
         }
+        if (hsm.kbest > 0)
+        { hsm.kbest_topk[i].first = ec.partial_prediction; // hsm.pred_root[i].scalar;
+          hsm.kbest_topk[i].second = i;
+        }
+      } else if (hsm.kbest > 0)
+      { hsm.kbest_topk[i].first = FLT_MAX;
+        hsm.kbest_topk[i].second = i;
       }
     if (hsm.filter)
       hsm.update_bottom.clear();
-    hsm.update_bottom.insert(new_pred0);
-
+    if (hsm.kbest == 1)
+      hsm.update_bottom.insert(new_pred0);
+    else
+    { std::sort(hsm.kbest_topk.begin(), hsm.kbest_topk.begin() + hsm.root);
+      for (size_t k=0; k<hsm.kbest; k++)
+        hsm.update_bottom.insert(hsm.kbest_topk[k].second);
+    }
+    
     for (CS::wclass& wc : ld.costs)
     { size_t j,j2;
       if (! hsm.redundant)
@@ -253,6 +303,7 @@ void finish(cshsm& c)
 { free(c.pred_root);
   free(c.pred_leaf);
   c.top_costs.delete_v();
+  c.kbest_topk.delete_v();
 }
 
 
@@ -268,14 +319,18 @@ base_learner* cshsm_setup(vw& all)
       ("classificationesque", "switch CSHSM into classification mode")
       ("hsm_branch", po::value<uint32_t>(&c.root)->default_value(2 * (int)ceilf(sqrt((float)c.K))), "branching factor at root")
       ("redundant", "use redundant representation (each class appears in two leaves instead of one)")
-      ("filter_tree", "do optimistic filter-tree optimization (ie don't update root if leaf cannot succeed & vice versa")
+      ("filter_tree", "do optimistic filter-tree optimization (ie don't update root if leaf cannot succeed & vice versa)")
+      ("kbest_tree", po::value<size_t>(), "do one-versus some between top K predicted leaves")
       ("initial_cost", po::value<float>(&c.initial)->default_value(0.), "set the initial prediction value (default 0.; 1. makes cshsm pessimistic)");
   add_options(all);
 
   c.redundant = all.vm.count("redundant") > 0;
+  c.kbest = (all.vm.count("kbest_tree") == 0) ? 1 : all.vm["kbest_tree"].as<size_t>();
   c.filter = all.vm.count("filter_tree") > 0;
   if (c.redundant && c.filter)
     THROW("cannot do both --redundant and --filter yet" << endl);
+  if ((c.kbest > 1) && (c.redundant))
+    THROW("cannot do both --redundant and --kbest_tree" << endl);
   c.classificationesque = all.vm.count("classificationesque") > 0;
   c.leaf = (uint32_t)ceilf((float)c.K / (float)c.root);
   c.root = (uint32_t)ceilf((float)c.K / (float)c.leaf); // correct if overshot
@@ -283,6 +338,11 @@ base_learner* cshsm_setup(vw& all)
   if (c.redundant)
     c.leaf *= 2;
 
+  c.kbest = min(c.kbest, c.root);
+  c.kbest_topk = v_init<pair<float,uint32_t>>();
+  for (size_t k=0; k<c.K; k++)
+    c.kbest_topk.push_back( make_pair(FLT_MAX, 0) );
+  
   //cerr << disp(c.root) << disp(c.leaf) << disp (ceil_K) << endl;
   
   c.pred_root = calloc_or_throw<polyprediction>(c.root);
