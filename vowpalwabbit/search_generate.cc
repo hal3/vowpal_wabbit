@@ -989,7 +989,7 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
   if (false || S.predictNeedsExample())
   { VW::copy_example_data(false, &ex, ec[(a == NullToken) ? 0 : a]);
     ex.indices.push_back((size_t)'l');  // left fr context
-    ex.indices.push_back((size_t)'j');  // more left fr context
+    ex.indices.push_back((size_t)'k');  // more left fr context
     ex.indices.push_back((size_t)'r');  // right fr context
     ex.indices.push_back((size_t)'s');  // more right fr context
     ex.indices.push_back((size_t)'a');  // alignment features
@@ -1001,8 +1001,8 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
     { // dont add neighborhood words for null alignment
       if (a > 0)   add_all_features(ex, *ec[a-1], 'l', mask, multiplier, 48931043, false, 0.5);
       else         add_feature(ex, (48931043 + 483910741), 'l', mask, multiplier);
-      if (a > 1)   add_all_features(ex, *ec[a-2], 'j', mask, multiplier, 148931043, false, 0.5);
-      else         add_feature(ex, (148931043 + 483910741), 'j', mask, multiplier);
+      if (a > 1)   add_all_features(ex, *ec[a-2], 'k', mask, multiplier, 148931043, false, 0.5);
+      else         add_feature(ex, (148931043 + 483910741), 'k', mask, multiplier);
       if (a < N-1) add_all_features(ex, *ec[a+1], 'r', mask, multiplier, 9831487, false, 0.5);
       else         add_feature(ex, (9831487 + 483910741), 'l', mask, multiplier);
       if (a < N-2) add_all_features(ex, *ec[a+2], 's', mask, multiplier, 19831487, false, 0.5);

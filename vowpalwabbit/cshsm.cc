@@ -82,7 +82,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
 
   //for (CS::wclass& wc : ld.costs)
   //  if (wc.x == 0.) cerr << "label = " << wc.class_index << endl;
-  
+
   base.multipredict(ec, 0, hsm.root, hsm.pred_root, false);
   //cerr << "hsm.predR ="; for (size_t i=0; i<hsm.root; i++) cerr << ' ' << hsm.pred_root[i].scalar; cerr << endl;
   uint32_t pred0 = 0;
@@ -117,7 +117,9 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
     float pred1_val = FLT_MAX;
     for (size_t k=0; k<hsm.kbest; k++)
     { uint32_t predk = hsm.kbest_topk[k].second;
-      float predk_v = hsm.kbest_topk[k].first;
+      //if (predk != pred0)
+      //  THROW("oops predk=" << predk << " pred0=" << pred0);
+      float predk_v = 0. * hsm.kbest_topk[k].first;
       //cerr << hsm.kbest_topk[k].first << ": ";
       uint32_t top = min(hsm.leaf, hsm.K - hsm.leaf * predk);
       base.multipredict(ec, hsm.root + hsm.leaf * predk, top, hsm.pred_leaf, false);
@@ -127,6 +129,7 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
         if (hsm.pred_leaf[i].scalar + predk_v < pred1_val)
         { pred1 = i;
           pred1_val = hsm.pred_leaf[i].scalar + predk_v;
+          pred0 = predk;
           prediction = predk * hsm.leaf + pred1 + 1;
           //cerr << '*';
           //if (k > 0) cerr << "WOW!";
@@ -229,18 +232,18 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
           new_pred0   = i;
         }
         if (hsm.kbest > 0)
-        { hsm.kbest_topk[i].first = ec.partial_prediction; // hsm.pred_root[i].scalar;
-          hsm.kbest_topk[i].second = i;
+        { //hsm.kbest_topk[i].first = ec.partial_prediction; // hsm.pred_root[i].scalar;
+          //hsm.kbest_topk[i].second = i;
         }
       } else if (hsm.kbest > 0)
-      { hsm.kbest_topk[i].first = FLT_MAX;
-        hsm.kbest_topk[i].second = i;
+      { //hsm.kbest_topk[i].first = FLT_MAX;
+        //hsm.kbest_topk[i].second = i;
       }
     if (hsm.filter)
       hsm.update_bottom.clear();
     if (hsm.kbest == 1)
       hsm.update_bottom.insert(new_pred0);
-    else
+    else if (hsm.kbest > 1)
     { std::sort(hsm.kbest_topk.begin(), hsm.kbest_topk.begin() + hsm.root);
       for (size_t k=0; k<hsm.kbest; k++)
         hsm.update_bottom.insert(hsm.kbest_topk[k].second);
@@ -263,7 +266,9 @@ void predict_or_learn(cshsm& hsm, LEARNER::base_learner& base, example& ec) {
       if ((hsm.update_bottom.find(j)  != hsm.update_bottom.end()) ||
           ((j != j2) && (hsm.update_bottom.find(j2) != hsm.update_bottom.end())))
       { set_label(hsm, ec.l.simple, wc.x, min_cost, max_cost);
-        if ((! hsm.redundant) && (j == pred0))
+        if (true) // safe
+          base.learn(ec, hsm.root + wc.class_index - 1);
+        else if ((! hsm.redundant) && (j == pred0))
         { ec.partial_prediction = hsm.pred_leaf[(wc.class_index-1) % hsm.leaf].scalar;
           ec.pred.scalar = ec.partial_prediction;
           base.update(ec, hsm.root + wc.class_index - 1);
@@ -338,6 +343,7 @@ base_learner* cshsm_setup(vw& all)
   if (c.redundant)
     c.leaf *= 2;
 
+  cerr << "cshsm initialized with " << c.root << " branches at root (" << c.leaf << " at leaf)" << endl;
   c.kbest = min(c.kbest, c.root);
   c.kbest_topk = v_init<pair<float,uint32_t>>();
   for (size_t k=0; k<c.K; k++)
@@ -433,4 +439,23 @@ base_learner* cshsm_setup(vw& all)
 
   
   
+*/
+
+/*
+  cat ted.vw22k_b | ./make_holdout_train.pl |  ./vw -b29 --search 22000 -k --cache_file .cache7 --passes 10 --search_task generate --search_rollin mix --search_rollout none --search_alpha 1e-10 --early_terminate 999 --progress 5000 --dictionary f:ted-xediff-128.paths.dict --search_output_heldout /dev/stdout --affix +5f --dictionary e:ted-xediff-en-128.paths.dict --generate_output_dictionary ted.dict_b --generate_oracle_alignment | tee output7 | ./running_bleu.pl
+  (no cshsm)
+  83.7 70.9 63.1 57.2 | 0.98 | 66.78 | 32.681080  32.681080
+
+  with cshsm
+  cshsm initialized with 298 branches at root (74 at leaf)
+  60.2 36.6 26.5 21.1 | 0.97 | 32.64 | 72.236038  72.236038
+
+  would like to close that 34 bleu point gap!
+
+  --hsm_branch 600 (595 /  37) ==> 37.20   +5
+  --hsm_branch 150 (150 / 147) ==> 29.41   -3
+  --redundant      (298 / 148) ==> 32.75   +0  (so redundant might have a bug)
+  --initial_cost 1 (298 /  74) ==> 31.26   -1
+  --kbest_tree 1   (298 /  74) ==> 32.64   !!
+  --kbest_tree 2   (298 /  74) ==> 12.82   <--- clearly a bug!
 */
