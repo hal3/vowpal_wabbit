@@ -1,5 +1,7 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -69,25 +71,57 @@ namespace cs_unittest
                     }
                     else
                     {
+                        int lineNr = 0;
+                        string[] predictions = null;
+                        if (File.Exists(predictFile))
+                            predictions = File.ReadAllLines(predictFile);
+
                         string dataLine;
                         while ((dataLine = streamReader.ReadLine()) != null)
                         {
                             if (!string.IsNullOrWhiteSpace(predictFile) && File.Exists(predictFile))
                             {
-                                float actualValue;
+                                object actualValue;
                                 if (args.Contains("-t")) // test only
-                                    actualValue = vw.Predict(dataLine, VowpalWabbitPredictionType.Scalar);
+                                    actualValue = vw.Predict(dataLine, VowpalWabbitPredictionType.Dynamic);
                                 else
-                                    actualValue = vw.Learn(dataLine, VowpalWabbitPredictionType.Scalar);
+                                    actualValue = vw.Learn(dataLine, VowpalWabbitPredictionType.Dynamic);
+
+                                if (predictions != null)
+                                {
+                                    // validate predictions
+                                    var actualFloat = actualValue as float?;
+                                    if (actualFloat != null)
+                                    {
+                                        var expectedPrediction = float.Parse(predictions[lineNr].Split(' ').First(), CultureInfo.InvariantCulture);
+                                        VWTestHelper.FuzzyEqual(expectedPrediction, (float)actualFloat, 1e-4, "Prediction mismatch");
+                                    }
+
+                                    var actualScalar = actualValue as VowpalWabbitScalar?;
+                                    if (actualScalar != null)
+                                    {
+                                        var expectedPredictions = predictions[lineNr]
+                                            .Split(' ')
+                                            .Select(field => float.Parse(field, CultureInfo.InvariantCulture))
+                                            .ToArray();
+
+                                        Assert.AreEqual(2, expectedPredictions.Length);
+                                        VWTestHelper.FuzzyEqual(expectedPredictions[0], actualScalar.Value.Value, 1e-4, "Prediction value mismatch");
+                                        VWTestHelper.FuzzyEqual(expectedPredictions[1], actualScalar.Value.Confidence, 1e-4, "Prediction confidence mismatch");
+                                    }
+                                }
                             }
                             else
                                 vw.Learn(dataLine);
+
+                            lineNr++;
                         }
                     }
 
-
-                    if (vw.Arguments.NumPasses > 0)
+                    if (vw.Arguments.NumPasses > 1)
                         vw.RunMultiPass();
+                    else
+                        vw.EndOfPass();
 
                     if (!string.IsNullOrWhiteSpace(stderr) && File.Exists(stderr))
                         VWTestHelper.AssertEqual(stderr, vw.PerformanceStatistics);

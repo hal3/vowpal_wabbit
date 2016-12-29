@@ -16,21 +16,17 @@ struct cbify;
 //Scorer class for use by the exploration library
 class vw_scorer : public IScorer<example>
 {
- public:
+public:
   vector<float> Score_Actions(example& ctx);
-  
 };
-
 
 struct vw_recorder : public IRecorder<example>
 { void Record(example& context, u32 a, float p, string /*unique_key*/)
-  {
-  }
+  { }
 
   virtual ~vw_recorder()
   { }
 };
-
 
 struct cbify
 { CB::label cb_label;
@@ -40,20 +36,19 @@ struct cbify
   MwtExplorer<example>* mwt_explorer;
   vw_recorder* recorder;
   v_array<action_score> a_s;
+  // used as the seed
+  size_t example_counter;
 };
 
 vector<float> vw_scorer::Score_Actions(example& ctx)
-{
-  vector<float> probs_vec;
-  for(uint32_t i = 0;i < ctx.pred.a_s.size();i++)
+{ vector<float> probs_vec;
+  for(uint32_t i = 0; i < ctx.pred.a_s.size(); i++)
     probs_vec.push_back(ctx.pred.a_s[i].score);
   return probs_vec;
 }
 
-
 float loss(uint32_t label, uint32_t final_prediction)
-{
-  if (label != final_prediction)
+{ if (label != final_prediction)
     return 1.;
   else
     return 0.;
@@ -73,8 +68,7 @@ void finish(cbify& data)
 
 template <bool is_learn>
 void predict_or_learn(cbify& data, base_learner& base, example& ec)
-{
-  //Store the multiclass input label
+{ //Store the multiclass input label
   MULTICLASS::label_t ld = ec.l.multi;
   data.cb_label.costs.erase();
   ec.l.cb = data.cb_label;
@@ -84,7 +78,7 @@ void predict_or_learn(cbify& data, base_learner& base, example& ec)
   base.predict(ec);
   //data.probs = ec.pred.scalars;
 
-  uint32_t action = data.mwt_explorer->Choose_Action(*data.generic_explorer, StringUtils::to_string(ec.example_counter), ec);
+  uint32_t action = data.mwt_explorer->Choose_Action(*data.generic_explorer, StringUtils::to_string(data.example_counter++), ec);
 
   CB::cb_class cl;
   cl.action = action;
@@ -118,14 +112,13 @@ base_learner* cbify_setup(vw& all)
   data.scorer = new vw_scorer();
   data.a_s = v_init<action_score>();
   //data.probs = v_init<float>();
-  data.generic_explorer = new GenericExplorer<example>(*data.scorer, (u32)num_actions);  
+  data.generic_explorer = new GenericExplorer<example>(*data.scorer, (u32)num_actions);
 
   if (count(all.args.begin(), all.args.end(),"--cb_explore") == 0)
   { all.args.push_back("--cb_explore");
     stringstream ss;
     ss << num_actions;
     all.args.push_back(ss.str());
-    all.args.push_back("--learn_only");
   }
   base_learner* base = setup_base(all);
 

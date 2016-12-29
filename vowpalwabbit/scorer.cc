@@ -3,12 +3,12 @@
 #include "reductions.h"
 #include "vw_exception.h"
 
+using namespace std;
 struct scorer { vw* all; }; // for set_minmax, loss
 
 template <bool is_learn, float (*link)(float in)>
 void predict_or_learn(scorer& s, LEARNER::base_learner& base, example& ec)
 { s.all->set_minmax(s.all->sd, ec.l.simple.label);
-
   if (is_learn && ec.l.simple.label != FLT_MAX && ec.weight > 0)
     base.learn(ec);
   else
@@ -71,8 +71,7 @@ LEARNER::base_learner* scorer_setup(vw& all)
     multipredict_f = multipredict<glf1>;
   }
   else if (link.compare("poisson") == 0)
-  {
-    *all.file_options << " --link=poisson ";
+  { *all.file_options << " --link=poisson ";
     l = &init_learner(&s, base, predict_or_learn<true, expf>, predict_or_learn<false, expf>);
     multipredict_f = multipredict<expf>;
   }

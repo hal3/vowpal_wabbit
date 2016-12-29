@@ -9,6 +9,8 @@
 #include <string>
 #include <sstream>
 
+using namespace std;
+
 #include "search_amr_parser.h"
 #include "gd.h"
 #include "cost_sensitive.h"
@@ -29,7 +31,7 @@ struct task_data
   v_array<uint32_t> valid_actions, action_loss, stack, temp, valid_action_temp, gold_concepts, concepts;
   v_array<v_array<uint32_t>> gold_heads, heads, gold_tags, tags;
   v_array<action> gold_actions, gold_action_temp;
-  v_array<pair<action, float>> gold_action_losses;
+  v_array<std::pair<action, float>> gold_action_losses;
   v_array<v_array<action>> possible_concepts;
   v_array<uint32_t> children[6]; // [0]:num_left_arcs, [1]:num_right_arcs; [2]: leftmost_arc, [3]: second_leftmost_arc, [4]:rightmost_arc, [5]: second_rightmost_arc
   example * ec_buf[13];
@@ -363,7 +365,7 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
   task_data *data = sch.get_task_data<task_data>();
   reset_ex(data->ex);
   uint64_t mask = sch.get_mask();
-  uint64_t multiplier = all.wpp << all.reg.stride_shift;
+  uint64_t multiplier = all.wpp << all.weights.stride_shift();
   v_array<uint32_t> &stack = data->stack, *children = data->children, &temp=data->temp;
   //v_array<v_array<uint32_t>> &tags = data->tags;
   example **ec_buf = data->ec_buf;

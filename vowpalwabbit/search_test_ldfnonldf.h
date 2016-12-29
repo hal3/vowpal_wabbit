@@ -9,6 +9,6 @@ license as described in the file LICENSE.
 namespace TestLDFNonLDFTask
 {
 void initialize(Search::search&, size_t&, po::variables_map&);
-void run(Search::search&, vector<example*>&);
+void run(Search::search&, std::vector<example*>&);
 extern Search::search_task task;
 }

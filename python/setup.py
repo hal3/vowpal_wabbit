@@ -58,6 +58,7 @@ def prep():
 
         # add explore
         copytree(path.join(here, '..', 'explore'), path.join(here, 'src', 'explore'))
+        copytree(path.join(here, '..', 'rapidjson'), path.join(here, 'src', 'rapidjson'))
 
         # add folders necessary to run 'make python'
         for folder in ['library', 'vowpalwabbit']:
@@ -167,6 +168,10 @@ setup(
         'License :: OSI Approved :: BSD License',
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.3',
+        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
     ],
     keywords='fast machine learning online classification regression',
     packages=find_packages(exclude=['examples', 'src', 'tests']),

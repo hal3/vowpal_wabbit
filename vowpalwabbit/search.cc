@@ -99,7 +99,7 @@ struct action_repr
   features *repr;
   action_repr(action _a, features* _repr) : a(_a)
   { if(_repr!=nullptr)
-    { repr = new features(); 
+    { repr = new features();
       repr->deep_copy_from(*_repr);
     }
     else
@@ -140,6 +140,7 @@ struct multitask_item
 struct search_private
 { vw* all;
 
+  uint64_t offset;
   bool auto_condition_features;  // do you want us to automatically add conditioning features?
   bool auto_hamming_loss;        // if you're just optimizing hamming loss, we can do it for you!
   bool examples_dont_change;     // set to true if you don't do any internal example munging
@@ -190,7 +191,6 @@ struct search_private
   float test_loss;               // loss incurred when run INIT_TEST
   float learn_loss;              // loss incurred when run LEARN
   float train_loss;              // loss incurred when run INIT_TRAIN
-  float total_example_t;         // accumulated weight of examples
 
   bool last_example_was_newline; // used so we know when a block of examples has passed
   bool hit_new_pass;             // have we hit a new pass?
@@ -529,15 +529,14 @@ void print_update(search_private& priv)
 }
 
 void add_new_feature(search_private& priv, float val, uint64_t idx)
-{ uint64_t mask = priv.all->reg.weight_mask;
-  size_t ss   = priv.all->reg.stride_shift;
+{ uint64_t mask = priv.all->weights.mask();
+  size_t ss = priv.all->weights.stride_shift();
   uint64_t idx2 = ((idx & mask) >> ss) & mask;
   features& fs = priv.dat_new_feature_ec->feature_space[priv.dat_new_feature_namespace];
   fs.push_back(val * priv.dat_new_feature_value, ((priv.dat_new_feature_idx + idx2) << ss) );
   cdbg << "adding: " << fs.indicies.last() << ':' << fs.values.last() << endl;
   if (priv.all->audit)
-  {
-    stringstream temp;
+  { stringstream temp;
     temp << "fid=" << ((idx & mask) >> ss) << "_" << priv.dat_new_feature_audit_ss.str();
     fs.space_names.push_back(audit_strings_ptr(new audit_strings(*priv.dat_new_feature_feature_space, temp.str())));
   }
@@ -582,12 +581,12 @@ void add_neighbor_features(search_private& priv)
 
       //cerr << "n=" << n << " offset=" << offset << endl;
       if ((offset < 0) && (n < (uint64_t)(-offset))) // add <s> feature
-        add_new_feature(priv, 1., 925871901 << priv.all->reg.stride_shift);
+        add_new_feature(priv, 1., 925871901 << priv.all->weights.stride_shift());
       else if (n + offset >= priv.ec_seq.size()) // add </s> feature
-        add_new_feature(priv, 1., 3824917 << priv.all->reg.stride_shift);
+        add_new_feature(priv, 1., 3824917 << priv.all->weights.stride_shift());
       else   // this is actually a neighbor
       { example& other = *priv.ec_seq[n + offset];
-        GD::foreach_feature<search_private,add_new_feature>(all.reg.weight_vector, all.reg.weight_mask, other.feature_space[ns], priv, me.ft_offset);
+        GD::foreach_feature<search_private,add_new_feature>(all.weights, other.feature_space[ns], priv, me.ft_offset);
       }
     }
 
@@ -714,7 +713,7 @@ void add_example_conditioning(search_private& priv, example& ec, size_t conditio
 
       // add the single bias feature
       if (n < priv.acset.max_bias_ngram_length)
-        add_new_feature(priv, 1., 4398201 << priv.all->reg.stride_shift);
+        add_new_feature(priv, 1., 4398201 << priv.all->weights.stride_shift());
 
       // add the quadratic features
       if (n < priv.acset.max_quad_ngram_length)
@@ -736,12 +735,12 @@ void add_example_conditioning(search_private& priv, example& ec, size_t conditio
             priv.dat_new_feature_audit_ss.clear();
             priv.dat_new_feature_audit_ss << "passthrough_repr_" << i << '_' << k;
           }
-          
+
           priv.dat_new_feature_ec  = &ec;
           priv.dat_new_feature_idx = fid;
           priv.dat_new_feature_namespace = conditioning_namespace;
           priv.dat_new_feature_value = fs.values[k];
-          add_new_feature(priv, 1., 4398201 << priv.all->reg.stride_shift);
+          add_new_feature(priv, 1., 4398201 << priv.all->weights.stride_shift());
         }
     }
     cdbg << "END adding passthrough features" << endl;
@@ -749,10 +748,10 @@ void add_example_conditioning(search_private& priv, example& ec, size_t conditio
 
   features& con_fs = ec.feature_space[conditioning_namespace];
   if ((con_fs.size() > 0) && (con_fs.sum_feat_sq > 0.))
-    { ec.indices.push_back(conditioning_namespace);
-      ec.total_sum_feat_sq += con_fs.sum_feat_sq;
-      ec.num_features += con_fs.size();
-    }
+  { ec.indices.push_back(conditioning_namespace);
+    ec.total_sum_feat_sq += con_fs.sum_feat_sq;
+    ec.num_features += con_fs.size();
+  }
   else
     con_fs.erase();
 }
@@ -1030,8 +1029,7 @@ action single_prediction_notLDF(search_private& priv, example& ec, int policy, c
         this_cache->push_back( action_cache(min_cost, cl, cl==act, cost) );
     }
     if (this_cache)
-    {
-      assert( priv.memo_foreach_action.size() == priv.meta_t + priv.t - 1 );
+    { assert( priv.memo_foreach_action.size() == priv.meta_t + priv.t - 1 );
       priv.memo_foreach_action.push_back(this_cache);
       cdbg << "memo_foreach_action[" << priv.meta_t + priv.t -1 << "] = " << this_cache << endl;
     }
@@ -1093,12 +1091,23 @@ action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, 
 
     polylabel old_label = ecs[a].l;
     ecs[a].l.cs = priv.ldf_test_label;
+
     if (priv.global_is_mixed_ldf) ecs[a].skip_reduction_layer = 2;
+
+    uint64_t old_offset = ecs[a].ft_offset;
+    ecs[a].ft_offset = priv.offset;
+
     priv.base_learner->predict(ecs[a], policy);
+    ecs[a].ft_offset = old_offset;
 
     priv.empty_example->in_use = true;
+
     if (priv.global_is_mixed_ldf) priv.empty_example->skip_reduction_layer = 2;
     priv.base_learner->predict(*priv.empty_example, policy);
+
+    priv.empty_example->ft_offset = priv.offset;
+    priv.base_learner->predict(*priv.empty_example);
+
 
     cdbg << "partial_prediction[" << a << "] = " << ecs[a].partial_prediction << endl;
 
@@ -1249,7 +1258,7 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
   }
   cdbg << "losses = ["; for (size_t i=0; i<losses.cs.costs.size(); i++) cdbg << ' ' << losses.cs.costs[i].class_index << ':' << losses.cs.costs[i].x; cdbg << " ], min_loss=" << min_loss << endl;
 
-  priv.total_example_t += 1.;   // TODO: should be max-min
+  //priv.total_example_t += 1.;   // TODO: should be max-min
 
   int32_t skip_reduction_layer = 0;
   if (priv.global_is_mixed_ldf) {
@@ -1271,8 +1280,8 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
     int32_t old_skip_reduction_layer = ec.skip_reduction_layer;
     ec.skip_reduction_layer = skip_reduction_layer;
     
-    float old_example_t = ec.example_t;
-    ec.example_t = priv.total_example_t;
+    //float old_example_t = ec.example_t;
+    //ec.example_t = priv.total_example_t;
     polylabel old_label = ec.l;
     ec.l = losses; // labels;
     if (add_conditioning) add_example_conditioning(priv, ec, priv.learn_condition_on.size(), priv.learn_condition_on_names.begin(), priv.learn_condition_on_act.begin());
@@ -1283,7 +1292,7 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
     }
     if (add_conditioning) del_example_conditioning(priv, ec);
     ec.l = old_label;
-    ec.example_t = old_example_t;
+    //ec.example_t = old_example_t;
     ec.skip_reduction_layer = old_skip_reduction_layer;
     priv.total_examples_generated++;
   }
@@ -1304,9 +1313,9 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
       int32_t old_skip_reduction_layer = priv.learn_ec_ref[0].skip_reduction_layer;
       for (action a= (uint32_t)start_K; a<priv.learn_ec_ref_cnt; a++)
       { example& ec = priv.learn_ec_ref[a];
-        float old_example_t = ec.example_t;
+        //float old_example_t = ec.example_t;
         ec.skip_reduction_layer = skip_reduction_layer;
-        ec.example_t = priv.total_example_t;
+        //ec.example_t = priv.total_example_t;
 
         CS::label& lab = ec.l.cs;
         if (lab.costs.size() == 0)
@@ -1316,14 +1325,19 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
         lab.costs[0].x = losses.cs.costs[a-start_K].x;
         //cerr << "cost[" << a << "] = " << losses[a] << " - " << min_loss << " = " << lab.costs[0].x << endl;
         ec.in_use = true;
+        uint64_t old_offset = ec.ft_offset;
+        ec.ft_offset = priv.offset;
         priv.base_learner->learn(ec, learner);
+        ec.ft_offset = old_offset;
 
         cdbg << "generate_training_example called learn on action a=" << a << ", costs.size=" << lab.costs.size() << ", costs[0]=" << lab.costs[0].x << ", ec=" << &ec << endl;
-        ec.example_t = old_example_t;
+        //ec.example_t = old_example_t;
         priv.total_examples_generated++;
       }
 
       priv.empty_example->skip_reduction_layer = skip_reduction_layer;
+      priv.empty_example->ft_offset = priv.offset;
+
       priv.base_learner->learn(*priv.empty_example, learner);
       priv.empty_example->skip_reduction_layer = old_skip_reduction_layer;
       cdbg << "generate_training_example called learn on empty_example" << endl;
@@ -1943,7 +1957,7 @@ inline bool cmp_float(const float a, const float b) { return a < b; }
 void debug_oracle(vw&all, search&sch)
 { search_private& priv = *sch.priv;
 
-  cout << "running reference on example " << priv.ec_seq[0]->example_t << endl;
+  //cout << "running reference on example " << priv.ec_seq[0]->example_t << endl;
   reset_search_structure(priv);
   priv.state = INIT_TRAIN;
   priv.rollin_method = ORACLE;
@@ -2129,6 +2143,7 @@ void do_actual_learning(vw&all, search& sch)  // first, might need to figure out
 template <bool is_learn>
 void search_predict_or_learn(search& sch, base_learner& base, example& ec)
 { search_private& priv = *sch.priv;
+  priv.offset = ec.ft_offset;
   vw* all = priv.all;
   priv.base_learner = &base;
   bool is_real_example = true;
@@ -2764,6 +2779,16 @@ base_learner* setup(vw&all)
       priv.global_is_mixed_ldf = true;
     priv.A = max_num_actions;
   }
+  /* HMMM this was cut out? TODO check this
+  base_learner* base = setup_base(all);
+
+  // default to OAA labels unless the task wants to override this (which they can do in initialize)
+  all.p->lp = MC::mc_label;
+  all.label_type = label_type::mc;
+  if (priv.task && priv.task->initialize)
+    priv.task->initialize(sch, priv.A, vm);
+  */
+  
   if (priv.metatask && priv.metatask->initialize)
     priv.metatask->initialize(sch, priv.A, vm);
   priv.meta_t = 0;
@@ -2860,7 +2885,8 @@ action search::predict(example& ec, ptag mytag, const action* oracle_actions, si
     if (priv->acset.use_passthrough_repr)
     { assert((mytag >= priv->ptag_to_action.size()) || (priv->ptag_to_action[mytag].repr ==  nullptr));
       push_at(priv->ptag_to_action, action_repr(a, &(priv->last_action_repr)), mytag);
-    } else
+    }
+    else
       push_at(priv->ptag_to_action, action_repr(a, (features*)nullptr), mytag);
     cdbg << "push_at " << mytag << " <- " << a << endl;
   }
@@ -2974,8 +3000,8 @@ void search::set_num_learners(size_t num_learners)
 
 void search::add_program_options(po::variables_map& /*vw*/, po::options_description& opts) { add_options( *this->priv->all, opts ); }
 
-uint64_t search::get_mask() { return this->priv->all->reg.weight_mask;}
-size_t search::get_stride_shift() { return this->priv->all->reg.stride_shift;}
+uint64_t search::get_mask() { return this->priv->all->weights.mask();}
+size_t search::get_stride_shift() { return this->priv->all->weights.stride_shift(); }
 uint32_t search::get_history_length() { return (uint32_t)this->priv->history_length; }
 
 string search::pretty_label(action a)

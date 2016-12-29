@@ -11,6 +11,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using VW.Labels;
 using VW.Serializer.Intermediate;
 
@@ -95,6 +96,8 @@ namespace VW.Serializer
             context.AppendStringExample(feature.Dictify, " {0}", stringValue);
         }
 
+        private static Regex escapeCharacters = new Regex("[ \t|:]", RegexOptions.Compiled);
+
         /// <summary>
         /// Marshals the supplied string into VW native space. Spaces are escaped using '_'.
         /// Only <paramref name="value"/> is serialized, <paramref name="feature"/> Name is ignored.
@@ -114,7 +117,7 @@ namespace VW.Serializer
                 return;
 
             // safe escape spaces
-            value = value.Replace(' ', '_');
+            value = escapeCharacters.Replace(value, "_");
 
             var featureHash = context.VW.HashFeature(value, ns.NamespaceHash);
             context.NamespaceBuilder.AddFeature(featureHash, 1f);
@@ -140,7 +143,7 @@ namespace VW.Serializer
                 return;
 
             // safe escape spaces
-            value = feature.Name + value.Replace(' ', '_');
+            value = feature.Name + escapeCharacters.Replace(value, "_");
 
             var featureHash = context.VW.HashFeature(value, ns.NamespaceHash);
             context.NamespaceBuilder.AddFeature(featureHash, 1f);
@@ -164,7 +167,7 @@ namespace VW.Serializer
             var words = value.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
             foreach (var s in words)
             {
-                var featureHash = context.VW.HashFeature(s, ns.NamespaceHash);
+                var featureHash = context.VW.HashFeature(escapeCharacters.Replace(s, "_"), ns.NamespaceHash);
                 context.NamespaceBuilder.AddFeature(featureHash, 1f);
             }
 
@@ -175,7 +178,7 @@ namespace VW.Serializer
 
             foreach (var s in words)
             {
-                context.AppendStringExample(feature.Dictify, " {0}", s);
+                context.AppendStringExample(feature.Dictify, " {0}", escapeCharacters.Replace(s, "_"));
             }
         }
 
@@ -275,24 +278,35 @@ namespace VW.Serializer
             Contract.Requires(feature != null);
 
             if (value == null)
-            {
                 return;
-            }
 
             foreach (var item in value)
-            {
                 context.NamespaceBuilder.AddFeature(context.VW.HashFeature(item.Replace(' ', '_'), ns.NamespaceHash), 1f);
-            }
 
             if (context.StringExample == null)
-            {
                 return;
-            }
 
             foreach (var item in value)
-            {
                 context.AppendStringExample(feature.Dictify, " {0}", item);
-            }
+        }
+
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name="context">The marshalling context.</param>
+        /// <param name="ns">The namespace description.</param>
+        /// <param name="feature">The feature description.</param>
+        /// <param name="value">The actual feature value.</param>
+        public void MarshalFeature(VowpalWabbitMarshalContext context, Namespace ns, Feature feature, IVowpalWabbitSerializable value)
+        {
+            Contract.Requires(context != null);
+            Contract.Requires(ns != null);
+            Contract.Requires(feature != null);
+
+            if (value == null)
+                return;
+
+            value.Marshal(context, ns, feature);
         }
 
         /// <summary>

@@ -6,9 +6,11 @@ license as described in the file LICENSE.
 #include "search_sequencetask.h"
 #include "vw.h"
 
-namespace SequenceTask         { Search::search_task task = { "sequence",          run, initialize, nullptr,  nullptr,  nullptr     }; }
-namespace SequenceSpanTask     { Search::search_task task = { "sequencespan",      run, initialize, finish,   setup,    takedown    }; }
-namespace SequenceTaskCostToGo { Search::search_task task = { "sequence_ctg",      run, initialize, nullptr,  nullptr,  nullptr     }; }
+using namespace std;
+
+namespace SequenceTask         { Search::search_task task = { "sequence",          run, initialize, nullptr,   nullptr,  nullptr     }; }
+namespace SequenceSpanTask     { Search::search_task task = { "sequencespan",      run, initialize, finish, setup, takedown }; }
+namespace SequenceTaskCostToGo { Search::search_task task = { "sequence_ctg",      run, initialize, nullptr,   nullptr,  nullptr     }; }
 namespace ArgmaxTask           { Search::search_task task = { "argmax",            run, initialize, finish,   nullptr,  nullptr     }; }
 namespace SequenceTask_DemoLDF { Search::search_task task = { "sequence_demoldf",  run, initialize, nullptr,  nullptr,  nullptr     }; }
 

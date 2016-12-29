@@ -31,15 +31,22 @@ namespace VowpalWabbit.Azure.Trainer
                         new Dictionary<string, string>
                         {
                             { "ID", example.EventId },
-                            { "VW", example.Example.VowpalWabbitString }
+                            { "VW", example.Example.VowpalWabbitString },
+                            { "JSON", example.JSON }
                         });
-
-                var progressivePrediction = example.Example.Learn(VowpalWabbitPredictionType.ActionScore, this.vw);
 
                 var label = example.Example.Labels
                     .OfType<ContextualBanditLabel>()
                     .FirstOrDefault(l => l.Probability != 0f || l.Cost != 0);
-                
+
+                if (label == null)
+                    this.telemetry.TrackTrace($"Unable to find valid label for event '{example.EventId}'", SeverityLevel.Warning);
+
+                // predict first then learn to avoid information leak
+                var progressivePrediction = example.Example.Predict(VowpalWabbitPredictionType.ActionProbabilities, this.vw);
+
+                example.Example.Learn(VowpalWabbitPredictionType.ActionProbabilities, this.vw);
+
                 //if (this.vwAllReduce != null)
                 //{
                 //    this.vwAllReduce.Post(vw =>
@@ -77,17 +84,25 @@ namespace VowpalWabbit.Azure.Trainer
                     // this.state.PartitionsDateTime[eventHubExample.PartitionKey] = eventHubExample.Offset;
                 }
 
-                return new TrainerResult
+                return new TrainerResult(progressivePrediction, example.Actions, example.Probabilities)
                 {
                     Label = label,
-                    ProgressivePrediction = progressivePrediction,
                     PartitionKey = example.PartitionKey,
-                    Latency = latency
+                    Latency = latency,
+                    ProbabilityOfDrop = example.ProbabilityOfDrop,
+                    ActionsTags = example.ActionsTags
                 };
             }
             catch (Exception ex)
             {
-                this.telemetry.TrackException(ex);
+                this.telemetry.TrackException(ex, 
+                    new Dictionary<string, string>
+                        {
+                            { "ID", example.EventId },
+                            { "VW", example.Example.VowpalWabbitString },
+                            { "JSON", example.JSON }
+                        });
+
                 this.perfCounters.Stage2_Faulty_ExamplesPerSec.Increment();
                 this.perfCounters.Stage2_Faulty_Examples_Total.Increment();
                 return null;

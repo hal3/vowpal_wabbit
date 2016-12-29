@@ -33,7 +33,7 @@ my $Valgrind = 'valgrind --quiet --error-exitcode=100 --track-origins=yes --leak
 
 # -- timeout is part of GNU coreutils, some systems may not have it
 my $TimeOut = '';
-my $TimeOutSec = 30;    # max allowed time for single vw command run
+my $TimeOutSec = 80;    # max allowed time for single vw command run
 
 # By default, we run all tests in the list
 my $FullRun = 1;
@@ -928,7 +928,7 @@ __DATA__
     train-sets/ref/3parity.stderr
 
 # Test 20: neural network 3-parity with 2 hidden units (predict)
-{VW} -d train-sets/3parity --hash all -t -i models/0021.model -p 0022.predict
+{VW} -d train-sets/3parity -t -i models/0021.model -p 0022.predict
     pred-sets/ref/0022.stderr
     pred-sets/ref/0022.predict
 
@@ -1485,3 +1485,68 @@ printf '3 |f a b c |e x y z\n2 |f a y c |e x\n' | \
 {VW} -d train-sets/cb_adf_crash_2.data -i models/cb_adf_crash.model -t
     train-sets/ref/cb_adf_crash2.stderr
 
+# Test 137: Fix for regression introduced by badeedb.  
+# Ensure audit output continues to work correctly in the presence of anon features.
+# Github issue 1038 (https://github.com/JohnLangford/vowpal_wabbit/issues/1038)
+{VW} --audit -d train-sets/audit.dat --noconstant
+    train-sets/ref/audit.stderr
+    train-sets/ref/audit.stdout
+
+# Test 138: cb_explore_adf with cover exploration
+{VW} --cb_explore_adf --cover 3 -d train-sets/cb_test.ldf --noconstant -p cbe_adf_cover.predict
+    train-sets/ref/cbe_adf_cover.stderr
+    pred-sets/ref/cbe_adf_cover.predict
+
+# Test 139: cb_explore_adf with cover exploration + double robust
+{VW} --cb_explore_adf --cover 3 --cb_type dr -d train-sets/cb_test.ldf --noconstant -p cbe_adf_cover_dr.predict
+    train-sets/ref/cbe_adf_cover_dr.stderr
+    pred-sets/ref/cbe_adf_cover_dr.predict
+
+# Test 140: marginal features
+{VW} --marginal f  -d train-sets/marginal_features --noconstant --initial_numerator 0.5 --initial_denominator 1.0 --decay 0.001 --holdout_off -c -k --passes 100 -f marginal_model
+    train-sets/ref/marginal.stderr
+
+# Test 141: marginal features test
+{VW} -i marginal_model  -d train-sets/marginal_features --noconstant -t 
+    train-sets/ref/marginal_test.stderr
+
+# Test 142: Evaluate exploration on contextal bandit data
+{VW} --explore_eval --epsilon 0.2 -d train-sets/cb_test.ldf --noconstant -p explore_eval.predict
+    train-sets/ref/explore_eval.stderr
+    pred-sets/ref/explore_eval.predict
+
+# Test 143: Test 1 using JSON
+{VW} -k -l 20 --initial_t 128000 --power_t 1 -d train-sets/0001.json --json \
+    -f models/0001.model -c --passes 8 --invariant \
+    --ngram 3 --skips 1 --holdout_off
+        train-sets/ref/0001.json.stderr
+
+# Test 144: cb_explore_adf with cover exploration + double robust
+{VW} --cb_explore_adf --cover 3 --cb_type dr -d train-sets/cb_test.json --json --noconstant -p cbe_adf_cover_dr.predict
+    train-sets/ref/cbe_adf_cover_dr.json.stderr
+    pred-sets/ref/cbe_adf_cover_dr.predict
+
+# Test 145: mix labeled and unlabeled examples with --bootstrap bug:
+# https://github.com/JohnLangford/vowpal_wabbit/issues/1111
+{VW} --bootstrap 2 -d train-sets/labeled-unlabeled-mix.dat
+    train-sets/ref/labeled-unlabeled-mix.stderr
+
+# Test 146: cb_explore_adf with cover exploration + double robust (using more than 256 examples)
+{VW} --cb_explore_adf --cover 3 --cb_type dr -d train-sets/cb_test256.json --json --noconstant -p cbe_adf_cover_dr256.predict
+    train-sets/ref/cbe_adf_cover_dr256.json.stderr
+    pred-sets/ref/cbe_adf_cover_dr256.predict
+
+# Test 147: --scores --oaa
+{VW} -d train-sets/probabilities.dat --scores --oaa=4 -p oaa_scores.predict
+   train-sets/ref/oaa_scores.stderr
+   pred-sets/ref/oaa_scores.predict
+
+#Test 148:  check cb_adf with direct method option
+{VW} --cb_adf -d train-sets/cb_test.ldf -p cb_adf_dm.predict --cb_type dm
+    train-sets/ref/cb_adf_dm.stderr
+    pred-sets/ref/cb_adf_dm.predict
+
+# Test 149: initial_weight option is used
+echo "1 | feature:1" | {VW} -a --initial_weight 0.1 --initial_t 0.3 --quiet
+    train-sets/ref/empty.stderr
+    train-sets/ref/initial_weight.stdout

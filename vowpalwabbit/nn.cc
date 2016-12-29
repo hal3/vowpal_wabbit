@@ -72,19 +72,19 @@ void finish_setup (nn& n, vw& all)
 
   memset (&n.output_layer, 0, sizeof (n.output_layer));
   n.output_layer.indices.push_back(nn_output_namespace);
-  uint64_t nn_index = nn_constant << all.reg.stride_shift;
+  uint64_t nn_index = nn_constant << all.weights.stride_shift();
 
   features& fs = n.output_layer.feature_space[nn_output_namespace];
   for (unsigned int i = 0; i < n.k; ++i)
-    { fs.push_back(1., nn_index);
-      nn_index += (uint64_t)n.increment;
-    }
+  { fs.push_back(1., nn_index);
+    nn_index += (uint64_t)n.increment;
+  }
   n.output_layer.num_features += n.k;
 
   if (! n.inpass)
-    { fs.push_back(1.,nn_index);
-      ++n.output_layer.num_features;
-    }
+  { fs.push_back(1.,nn_index);
+    ++n.output_layer.num_features;
+  }
 
   n.output_layer.in_use = true;
 
@@ -120,7 +120,6 @@ void predict_or_learn_multi(nn& n, base_learner& base, example& ec)
 { bool shouldOutput = n.all->raw_prediction > 0;
   if (! n.finished_setup)
     finish_setup (n, *(n.all));
-
   shared_data sd;
   memcpy (&sd, n.all->sd, sizeof(shared_data));
   shared_data* save_sd = n.all->sd;
@@ -238,7 +237,6 @@ CONVERSE: // That's right, I'm using goto.  So sue me.
   { // TODO: this is not correct if there is something in the
     // nn_output_namespace but at least it will not leak memory
     // in that case
-
     ec.indices.push_back (nn_output_namespace);
     features save_nn_output_namespace = ec.feature_space[nn_output_namespace];
     ec.feature_space[nn_output_namespace] = n.output_layer.feature_space[nn_output_namespace];
@@ -259,7 +257,6 @@ CONVERSE: // That's right, I'm using goto.  So sue me.
     n.output_layer.l = ec.l;
     n.output_layer.weight = ec.weight;
     n.output_layer.partial_prediction = 0;
-    n.output_layer.example_t = ec.example_t;
     if (is_learn)
       base.learn(n.output_layer, n.k);
     else
@@ -388,7 +385,7 @@ base_learner* nn_setup(vw& all)
   nn& n = calloc_or_throw<nn>();
   n.all = &all;
   //first parse for number of hidden units
-  n.k = (uint64_t)vm["nn"].as<size_t>();
+  n.k = (uint32_t)vm["nn"].as<size_t>();
 
   if ( vm.count("dropout") )
   { n.dropout = true;

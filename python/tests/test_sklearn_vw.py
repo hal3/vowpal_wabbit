@@ -4,7 +4,7 @@ import pytest
 
 from vowpalwabbit.sklearn_vw import VW, VWClassifier, VWRegressor, tovw
 from sklearn import datasets
-from sklearn.utils.validation import NotFittedError
+from sklearn.exceptions import NotFittedError
 from scipy.sparse import csr_matrix
 
 
@@ -66,10 +66,6 @@ class TestVW:
         model.fit(data.x, data.y)
         assert not np.allclose(weights.data, model.get_coefs().data)
 
-        # second pass weights should match
-        model.fit(data.x, data.y)
-        assert np.allclose(weights.data, model.get_coefs().data)
-
     def test_predict_not_fit(self, data):
         model = VW(loss_function='logistic')
         with pytest.raises(NotFittedError):
@@ -100,7 +96,6 @@ class TestVW:
         model = VW()
         model.fit(data.x, data.y)
         weights = model.get_coefs()
-        print weights.data
         assert np.allclose(weights.indices, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 116060])
 
     def test_get_intercept(self, data):
@@ -109,15 +104,41 @@ class TestVW:
         intercept = model.get_intercept()
         assert isinstance(intercept, float)
 
-    def test_oaa(self):
+    def test_oaa_probs(self):
         X = ['1 | feature1:2.5',
              '2 | feature1:0.11 feature2:-0.0741',
              '3 | feature3:2.33 feature4:0.8 feature5:-3.1',
              '1 | feature2:-0.028 feature1:4.43',
              '2 | feature5:1.532 feature6:-3.2']
-        model = VW(convert_to_vw=False, oaa=3)
+        model = VW(convert_to_vw=False, oaa=3, loss_function='logistic', probabilities=True)
         model.fit(X)
-        assert np.allclose(model.predict(X), [ 1.,  2.,  3.,  1.,  2.])
+        prediction = model.predict(X)
+        assert prediction.shape == [5, 3]
+        assert prediction[0, 0] > 0.1
+
+    def test_oaa_probs(self):
+        X = ['1 | feature1:2.5',
+             '2 | feature1:0.11 feature2:-0.0741',
+             '3 | feature3:2.33 feature4:0.8 feature5:-3.1',
+             '1 | feature2:-0.028 feature1:4.43',
+             '2 | feature5:1.532 feature6:-3.2']
+        model = VW(convert_to_vw=False, oaa=3, loss_function='logistic')
+        model.fit(X)
+        prediction = model.predict(X)
+        assert np.allclose(prediction, [1., 2., 3., 1., 2.])
+
+    def test_lrq(self):
+        X = ['1 |user A |movie 1',
+             '2 |user B |movie 2',
+             '3 |user C |movie 3',
+             '4 |user D |movie 4',
+             '5 |user D |movie 1']
+        model = VW(convert_to_vw=False, lrq='um4', lrqdropout=True, loss_function='quantile')
+        assert model.params['lrq'] == 'um4'
+        assert model.params['lrqdropout']
+        model.fit(X)
+        prediction = model.predict([' |user C |movie 1'])
+        assert np.allclose(prediction, [3.], atol=1)
 
 
 class TestVWClassifier:
@@ -131,12 +152,13 @@ class TestVWClassifier:
         raw_model.fit(data.x, data.y)
         predictions = raw_model.predict(data.x)
         class_indices = (predictions > 0).astype(np.int)
-        class_predictions = classes[class_indices]
+        expected = classes[class_indices]
 
         model = VWClassifier()
         model.fit(data.x, data.y)
+        actual = model.predict(data.x)
 
-        assert np.allclose(class_predictions, model.predict(data.x))
+        assert np.allclose(expected, actual)
 
 
 class TestVWRegressor:

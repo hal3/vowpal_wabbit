@@ -10,8 +10,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using VW.Labels;
 
 namespace VW
@@ -38,7 +36,8 @@ namespace VW
                 numberOfFeatures += shared.NumberOfFeatures;
 
             foreach (var e in examples)
-                numberOfFeatures += e.NumberOfFeatures;
+                if (e != null)
+                    numberOfFeatures += e.NumberOfFeatures;
         }
 
         /// <summary>
@@ -196,7 +195,8 @@ namespace VW
                 if (this.Examples != null)
                 {
                     foreach (var ex in this.Examples)
-                        ex.Dispose();
+                        if (ex != null)
+                            ex.Dispose();
 
                     this.Examples = null;
                 }

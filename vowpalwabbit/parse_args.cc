@@ -68,6 +68,8 @@ license as described in the file LICENSE.
 #include "vw_allreduce.h"
 #include "OjaNewton.h"
 #include "audit_regressor.h"
+#include "marginal.h"
+#include "explore_eval.h"
 
 using namespace std;
 //
@@ -371,6 +373,7 @@ void parse_source(vw& all)
   ("port_file", po::value< string >(), "Write port used in persistent daemon mode")
   ("cache,c", "Use a cache.  The default is <data>.cache")
   ("cache_file", po::value< vector<string> >(), "The location(s) of cache_file.")
+  ("json", "Enable JSON parsing.")
   ("kill_cache,k", "do not reuse existing cache: create a new one always")
   ("compressed", "use gzip format whenever possible. If a cache file is being created, this option creates a compressed cache file. A mixture of raw-text & compressed inputs are supported with autodetection.")
   ("no_stdin", "do not default to reading from stdin");
@@ -537,7 +540,9 @@ void parse_feature_tweaks(vw& all)
   //feature manipulation
   string hash_function("strings");
   if(vm.count("hash"))
-    hash_function = vm["hash"].as<string>();
+  { hash_function = vm["hash"].as<string>();
+    *all.file_options << " --hash " << hash_function;
+  }
   all.p->hasher = getHasher(hash_function);
 
   if (vm.count("spelling"))
@@ -873,7 +878,7 @@ void parse_example_tweaks(vw& all)
   else
     all.training = true;
 
-  if(all.numpasses > 1)
+  if(all.numpasses > 1 || all.holdout_after > 0)
     all.holdout_set_off = false;
 
   if(vm.count("holdout_off"))
@@ -1063,6 +1068,7 @@ void parse_reductions(vw& all)
   all.reduction_stack.push_back(confidence_setup);
   all.reduction_stack.push_back(nn_setup);
   all.reduction_stack.push_back(mf_setup);
+  all.reduction_stack.push_back(marginal_setup);
   all.reduction_stack.push_back(autolink_setup);
   all.reduction_stack.push_back(lrq_setup);
   all.reduction_stack.push_back(lrqfa_setup);
@@ -1090,6 +1096,7 @@ void parse_reductions(vw& all)
   all.reduction_stack.push_back(cb_explore_setup);
   all.reduction_stack.push_back(cb_explore_adf_setup);
   all.reduction_stack.push_back(cbify_setup);
+  all.reduction_stack.push_back(explore_eval_setup);
 
   all.reduction_stack.push_back(ExpReplay::expreplay_setup<'c', COST_SENSITIVE::cs_label>);
   all.reduction_stack.push_back(Search::setup);
@@ -1251,8 +1258,9 @@ void parse_modules(vw& all, io_buf& model)
   }
 }
 
-void parse_sources(vw& all, io_buf& model)
-{ load_input_model(all, model);
+void parse_sources(vw& all, io_buf& model, bool skipModelLoad)
+{ if (!skipModelLoad)
+    load_input_model(all, model);
 
   parse_source(all);
 
@@ -1263,7 +1271,7 @@ void parse_sources(vw& all, io_buf& model)
   size_t params_per_problem = all.l->increment;
   while (params_per_problem > (uint32_t)(1 << i))
     i++;
-  all.wpp = (1 << i) >> all.reg.stride_shift;
+  all.wpp = (1 << i) >> all.weights.stride_shift();
 
   if (all.vm.count("help"))
   { /* upon direct query for help -- spit it out to stdout */
@@ -1329,24 +1337,23 @@ void free_args(int argc, char* argv[])
   free(argv);
 }
 
-vw* initialize(string s, io_buf* model)
-{
-  int argc = 0;
+vw* initialize(string s, io_buf* model, bool skipModelLoad)
+{ int argc = 0;
   char** argv = get_argv_from_string(s,argc);
   vw* ret = nullptr;
-  
+
   try
-  { ret = initialize(argc, argv, model); }
+  { ret = initialize(argc, argv, model, skipModelLoad); }
   catch(...)
   { free_args(argc, argv);
     throw;
   }
-  
+
   free_args(argc, argv);
   return ret;
 }
 
-vw* initialize(int argc, char* argv[], io_buf* model)
+vw* initialize(int argc, char* argv[], io_buf* model, bool skipModelLoad)
 { vw& all = parse_args(argc, argv);
 
   try
@@ -1358,13 +1365,18 @@ vw* initialize(int argc, char* argv[], io_buf* model)
     }
 
     parse_modules(all, *model);
-    parse_sources(all, *model);
+    parse_sources(all, *model, skipModelLoad);
 
     initialize_parser_datastructures(all);
 
     all.l->init_driver();
 
     return &all;
+  }
+  catch (std::exception& e)
+  { std::cerr << "Error: " << e.what() << "\n";
+    finish(all);
+    throw;
   }
   catch (...)
   { finish(all);
@@ -1388,16 +1400,14 @@ vw* seed_vw_model(vw* vw_model, const string extra_args)
     init_args << model_args[i] << " ";
   }
 
-  vw* new_model = VW::initialize(init_args.str().c_str());
+  vw* new_model = VW::initialize(init_args.str().c_str(), nullptr, true /* skipModelLoad */);
 
-  free_it(new_model->reg.weight_vector);
+  new_model->weights.~weight_parameters();
   free_it(new_model->sd);
 
   // reference model states stored in the specified VW instance
-  new_model->reg = vw_model->reg; // regressor
+  new_model->weights.shallow_copy(vw_model->weights); // regressor
   new_model->sd = vw_model->sd; // shared data
-
-  new_model->seeded = true;
 
   return new_model;
 }
@@ -1481,14 +1491,13 @@ void finish(vw& all, bool delete_all)
   { all.l->finish();
     free_it(all.l);
   }
-  if (all.reg.weight_vector != nullptr && !all.seeded) // don't free weight vector if it is shared with another instance
-    free(all.reg.weight_vector);
+
   free_parser(all);
   finalize_source(all.p);
   all.p->parse_name.erase();
   all.p->parse_name.delete_v();
   free(all.p);
-  if (!all.seeded)
+  if (!all.weights.seeded())
   { delete(all.sd->ldict);
     free(all.sd);
   }

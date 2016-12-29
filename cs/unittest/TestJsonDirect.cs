@@ -106,6 +106,23 @@ namespace cs_unittest
 
         [TestMethod]
         [TestCategory("JSON")]
+        [TestCategory("Marshal")]
+        public void TestJsonDictionaryStringFloat()
+        {
+            using (var vw = new VowpalWabbitExampleValidator<POCODict>(new VowpalWabbitSettings { TypeInspector = JsonTypeInspector.Default }))
+            {
+                vw.Validate("|Features Feature1:2.1 Feature2:3.2", new POCODict { Features = new Dictionary<string, float> { { "Feature1", 2.1f }, { "Feature2", 3.2f } } });
+            }
+
+            // test serialzier caching too
+            using (var vw = new VowpalWabbitExampleValidator<POCODict>(new VowpalWabbitSettings { TypeInspector = TypeInspector.All }))
+            {
+                vw.Validate("| Abc:2.1 def:3.2", new POCODict { Features = new Dictionary<string, float> { { "Abc", 2.1f }, { "def", 3.2f } } });
+            }
+        }
+
+        [TestMethod]
+        [TestCategory("JSON")]
         public void TestJsonByte()
         {
             using (var vw = new VowpalWabbitExampleValidator<JsonContextByte>(new VowpalWabbitSettings { TypeInspector = JsonTypeInspector.Default }))
@@ -215,6 +232,52 @@ namespace cs_unittest
                 });
             }
         }
+
+        [TestMethod]
+        [TestCategory("JSON")]
+        public void TestJsonConvertibleMulti()
+        {
+            using (var vw = new VowpalWabbitExampleValidator<JsonRawAdfString>(new VowpalWabbitSettings("--cb_adf") { TypeInspector = JsonTypeInspector.Default }))
+            {
+                vw.Validate(new[] {
+                    "shared | Bar:5",
+                    " | Foo:1 |Value test:1.2",
+                    " | Foo:2 |Value test:2.3",
+                },
+                new JsonRawAdfString
+                {
+                    Bar = 5,
+                    _multi = new []
+                    {
+                        new JsonRawString
+                        {
+                            Foo = 1,
+                            Value = JsonConvert.SerializeObject(new { test = 1.2 })
+                        },
+                        new JsonRawString
+                        {
+                            Foo = 2,
+                            Value = JsonConvert.SerializeObject(new { test = 2.3 })
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    public class JsonRawString
+    {
+        public int Foo { get; set; }
+
+        [JsonConverter(typeof(JsonRawStringConverter))]
+        public string Value { get; set; }
+    }
+
+    public class JsonRawAdfString
+    {
+        public int Bar { get; set; }
+
+        public JsonRawString[] _multi { get; set; }
     }
 
     public class JsonText
@@ -290,6 +353,12 @@ namespace cs_unittest
 
         [JsonIgnore]
         public string DontConsider { get; set; }
+
+        [JsonProperty]
+        public string EscapeCharacterString { get; set; }
+
+        [JsonProperty("_text")]
+        public string EscapeCharactersText { get; set; }
     }
 
     public class Namespace2
