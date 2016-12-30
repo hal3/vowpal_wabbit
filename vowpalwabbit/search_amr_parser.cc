@@ -19,6 +19,8 @@
 #define val_namespace 100 // valency and distance feature space
 #define offset_const 344429
 
+using namespace std;
+
 namespace AMRParserTask         {  Search::search_task task = { "amr_parser", run, initialize, finish, setup, nullptr};  }
 
 struct gold_head_T
@@ -444,7 +446,7 @@ void extract_features(Search::search& sch, uint32_t idx,  vector<example*> &ec)
   task_data *data = sch.get_task_data<task_data>();
   reset_ex(data->ex);
   uint64_t mask = sch.get_mask();
-  uint64_t multiplier = all.wpp << all.reg.stride_shift;
+  uint64_t multiplier = all.wpp << all.weights.stride_shift();
   v_array<uint32_t> &stack = data->stack, *children = data->children, &temp=data->temp;
   //v_array<v_array<uint32_t>> &tags = data->tags;
   example **ec_buf = data->ec_buf;
@@ -967,7 +969,7 @@ void run(Search::search& sch, vector<example*>& ec)
 
   vw& all = sch.get_vw_pointer_unsafe();
   uint64_t mask = sch.get_mask();  
-  uint64_t multiplier = all.wpp << all.reg.stride_shift;
+  uint64_t multiplier = all.wpp << all.weights.stride_shift();
 
   int count=1;
   size_t idx = 1;

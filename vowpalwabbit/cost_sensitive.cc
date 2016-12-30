@@ -2,6 +2,8 @@
 #include "gd.h"
 #include "vw.h"
 #include "vw_exception.h"
+
+using namespace std;
 namespace COST_SENSITIVE
 {
 
@@ -115,27 +117,27 @@ void parse_label(parser* p, shared_data*sd, void* v, v_array<substring>& words)
   ld->costs.erase();
 
   // handle shared and label first
-  if (words.size() == 1) {
-    float fx;
+  if (words.size() == 1)
+  { float fx;
     name_value(words[0], p->parse_name, fx);
     bool eq_shared = substring_eq(p->parse_name[0], "***shared***");
     bool eq_label  = substring_eq(p->parse_name[0], "***label***");
-    if (! sd->ldict) {
-      eq_shared |= substring_eq(p->parse_name[0], "shared");
+    if (! sd->ldict)
+    { eq_shared |= substring_eq(p->parse_name[0], "shared");
       eq_label  |= substring_eq(p->parse_name[0], "label");
     }
-    if (eq_shared || eq_label) {
-      if (eq_shared) {
-        if (p->parse_name.size() != 1) cerr << "shared feature vectors should not have costs on: " << words[0] << endl;
-        else {
-          wclass f = { -FLT_MAX, 0, 0., 0.};
+    if (eq_shared || eq_label)
+    { if (eq_shared)
+      { if (p->parse_name.size() != 1) cerr << "shared feature vectors should not have costs on: " << words[0] << endl;
+        else
+        { wclass f = { -FLT_MAX, 0, 0., 0.};
           ld->costs.push_back(f);
         }
       }
-      if (eq_label) {
-        if (p->parse_name.size() != 2) cerr << "label feature vectors should have exactly one cost on: " << words[0] << endl;
-        else {
-          wclass f = { float_of_substring(p->parse_name[1]), 0, 0., 0.};
+      if (eq_label)
+      { if (p->parse_name.size() != 2) cerr << "label feature vectors should have exactly one cost on: " << words[0] << endl;
+        else
+        { wclass f = { float_of_substring(p->parse_name[1]), 0, 0., 0.};
           ld->costs.push_back(f);
         }
       }
@@ -170,7 +172,7 @@ label_parser cs_label = {default_label, parse_label,
                          sizeof(label)
                         };
 
-void print_update(vw& all, bool is_test, example& ec, const v_array<example*>* ec_seq, bool multilabel, uint32_t prediction)
+void print_update(vw& all, bool is_test, example& ec, const v_array<example*>* ec_seq, bool action_scores, uint32_t prediction)
 { if (all.sd->weighted_examples >= all.sd->dump_interval && !all.quiet && !all.bfgs)
   { size_t num_current_features = ec.num_features;
     // for csoaa_ldf we want features from the whole (multiline example),
@@ -196,16 +198,16 @@ void print_update(vw& all, bool is_test, example& ec, const v_array<example*>* e
     else
       label_buf = " known";
 
-    if (multilabel || all.sd->ldict)
+    if (action_scores || all.sd->ldict)
     { std::ostringstream pred_buf;
 
       pred_buf << std::setw(all.sd->col_current_predict) << std::right << std::setfill(' ');
       if (all.sd->ldict)
-      { if (multilabel) pred_buf << all.sd->ldict->get(ec.pred.multilabels.label_v[0]);
+      { if (action_scores) pred_buf << all.sd->ldict->get(ec.pred.a_s[0].action);
         else            pred_buf << all.sd->ldict->get(prediction);
       }
-      else            pred_buf << ec.pred.multilabels.label_v[0];
-      if (multilabel) pred_buf <<".....";
+      else            pred_buf << ec.pred.a_s[0].action;
+      if (action_scores) pred_buf <<".....";
       all.sd->print_update(all.holdout_set_off, all.current_pass, label_buf, pred_buf.str(),
                            num_current_features, all.progress_add, all.progress_arg);;
     }
@@ -232,7 +234,7 @@ void output_example(vw& all, example& ec)
         min = cl.x;
     }
     if (chosen_loss == FLT_MAX)
-      cerr << "warning: csoaa predicted an invalid class" << endl;
+      cerr << "warning: csoaa predicted an invalid class. Are all multi-class labels in the {1..k} range?" << endl;
 
     loss = chosen_loss - min;
   }

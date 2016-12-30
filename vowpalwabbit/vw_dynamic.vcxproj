@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="DebugLeakCheck|Win32">
@@ -112,9 +112,7 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <PropertyGroup Label="UserMacros">
-    <NuGetPackageImportStamp>78d739ca</NuGetPackageImportStamp>
-  </PropertyGroup>
+  <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
@@ -286,7 +284,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>..\explore\static;./win32;%(AdditionalIncludeDirectories);</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\explore\static;./win32;%(AdditionalIncludeDirectories);..\rapidjson\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>ZLIB_WINAPI;_WINSOCK_DEPRECATED_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/D "_CRT_SECURE_NO_WARNINGS" %(AdditionalOptions)</AdditionalOptions>
       <InlineFunctionExpansion Condition="'$(Configuration)'=='Release'">AnySuitable</InlineFunctionExpansion>
@@ -345,8 +343,8 @@
       <FileType>CppHeader</FileType>
     </ClCompile>
     <ClInclude Include="active_cover.h" />
-    <ClCompile Include="primitives.cc" />
-    <ClCompile Include="vw_validate.cc" />
+    <ClInclude Include="action_score.h" />
+    <ClInclude Include="array_parameters.h" />
     <ClInclude Include="autolink.h" />
     <ClInclude Include="accumulate.h" />
     <ClInclude Include="active.h" />
@@ -355,8 +353,10 @@
     <ClInclude Include="binary.h" />
     <ClInclude Include="cache.h" />
     <ClInclude Include="cb_explore.h" />
+    <ClInclude Include="cb_explore_adf.h" />
     <ClInclude Include="gen_cs_example.h" />
     <ClInclude Include="cb_adf.h" />
+    <ClInclude Include="cbify.h" />
     <ClInclude Include="comp_io.h" />
     <ClInclude Include="confidence.h" />
     <ClInclude Include="constant.h" />
@@ -364,6 +364,7 @@
     <ClInclude Include="csoaa.h" />
     <ClInclude Include="ect.h" />
     <ClInclude Include="example.h" />
+    <ClInclude Include="explore_eval.h" />
     <ClInclude Include="feature_group.h" />
     <ClInclude Include="gd.h" />
     <ClInclude Include="interactions.h" />
@@ -380,6 +381,8 @@
     <ClInclude Include="lrq.h" />
     <ClInclude Include="lrqfa.h" />
     <ClInclude Include="log_multi.h" />
+    <ClInclude Include="parse_example_json.h" />
+    <ClInclude Include="recall_tree.h" />
     <ClInclude Include="global_data.h" />
     <ClInclude Include="hash.h" />
     <ClInclude Include="interact.h" />
@@ -387,6 +390,7 @@
     <ClInclude Include="lda_core.h" />
     <ClInclude Include="learner.h" />
     <ClInclude Include="loss_functions.h" />
+    <ClInclude Include="marginal.h" />
     <ClInclude Include="multilabel.h" />
     <ClInclude Include="multilabel_oaa.h" />
     <ClInclude Include="network.h" />
@@ -394,6 +398,7 @@
     <ClInclude Include="noop.h" />
     <ClInclude Include="print.h" />
     <ClInclude Include="oaa.h" />
+    <ClInclude Include="OjaNewton.h" />
     <ClInclude Include="boosting.h" />
     <ClInclude Include="bs.h" />
     <ClInclude Include="parser.h" />
@@ -430,6 +435,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="active_cover.cc" />
+    <ClCompile Include="action_score.cc" />
     <ClCompile Include="autolink.cc" />
     <ClCompile Include="accumulate.cc" />
     <ClCompile Include="active.cc" />
@@ -440,6 +446,7 @@
     <ClCompile Include="cb.cc" />
     <ClCompile Include="cbify.cc" />
     <ClCompile Include="cb_explore.cc" />
+    <ClCompile Include="cb_explore_adf.cc" />
     <ClCompile Include="gen_cs_example.cc" />
     <ClCompile Include="cb_adf.cc" />
     <ClCompile Include="comp_io.cc" />
@@ -447,6 +454,7 @@
     <ClCompile Include="csoaa.cc" />
     <ClCompile Include="ect.cc" />
     <ClCompile Include="example.cc" />
+    <ClCompile Include="explore_eval.cc" />
     <ClCompile Include="gd.cc" />
     <ClCompile Include="interactions.cc" />
     <ClCompile Include="audit_regressor.cc" />
@@ -463,6 +471,8 @@
     <ClCompile Include="lrq.cc" />
     <ClCompile Include="lrqfa.cc" />
     <ClCompile Include="log_multi.cc" />
+    <ClCompile Include="parse_example_json.cc" />
+    <ClCompile Include="recall_tree.cc" />
     <ClCompile Include="best_constant.cc" />
     <ClCompile Include="global_data.cc" />
     <ClCompile Include="hash.cc" />
@@ -470,13 +480,16 @@
     <ClCompile Include="lda_core.cc" />
     <ClCompile Include="learner.cc" />
     <ClCompile Include="loss_functions.cc" />
+    <ClCompile Include="marginal.cc" />
     <ClCompile Include="multilabel.cc" />
     <ClCompile Include="multilabel_oaa.cc" />
     <ClCompile Include="network.cc" />
     <ClCompile Include="nn.cc" />
     <ClCompile Include="noop.cc" />
+    <ClCompile Include="primitives.cc" />
     <ClCompile Include="print.cc" />
     <ClCompile Include="oaa.cc" />
+    <ClCompile Include="OjaNewton.cc" />
     <ClCompile Include="boosting.cc" />
     <ClCompile Include="bs.cc" />
     <ClCompile Include="parser.cc" />
@@ -502,6 +515,7 @@
     <ClCompile Include="topk.cc" />
     <ClCompile Include="unique_sort.cc" />
     <ClCompile Include="vw_exception.cc" />
+    <ClCompile Include="vw_validate.cc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config">

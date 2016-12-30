@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.Contracts;
 using System.Linq;
 using System.Linq.Expressions;
@@ -7,7 +8,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text;
 using System.Threading.Tasks;
-using VW.Interfaces;
+using VW.Labels;
 using VW.Reflection;
 using VW.Serializer.Intermediate;
 
@@ -18,11 +19,12 @@ namespace VW.Serializer
     /// </summary>
     /// <typeparam name="TExample">The example user type.</typeparam>
     /// <returns>A serializer for the given user example type.</returns>
-    internal sealed class VowpalWabbitSingleExampleSerializerCompiler<TExample> : IVowpalWabbitSerializerCompiler<TExample>
+    public sealed class VowpalWabbitSingleExampleSerializerCompiler<TExample> : IVowpalWabbitSerializerCompiler<TExample>
     {
                 /// <summary>
         /// Internal structure collecting all itmes required to marshal a single feature.
         /// </summary>
+        [DebuggerDisplay("FeatureExpressionInternal(Source={Source}, MarshalMethod={MarshalMethod})")]
         internal sealed class FeatureExpressionInternal
         {
             /// <summary>
@@ -61,7 +63,7 @@ namespace VW.Serializer
 
         /// <summary>
         /// Ordered list of featurizer types. Marshalling methods are resolved in order of this list.
-        /// <see cref="VowpalWabbitDefaultMarshaller"/> is added last as  default.
+        /// <see cref="VowpalWabbitDefaultMarshaller"/> is added last as default.
         /// </summary>
         private readonly List<Type> marshallerTypes;
 
@@ -177,6 +179,11 @@ namespace VW.Serializer
             return this.Create(vw);
         }
 
+        /// <summary>
+        /// Creates a serializer for <typeparamref name="TExample"/> bound to <paramref name="vw"/>.
+        /// </summary>
+        /// <param name="vw">The VW native instance examples will be assocated with.</param>
+        /// <returns>A serializer for <typeparamref name="TExample"/>.</returns>
         public VowpalWabbitSingleExampleSerializer<TExample> Create(VowpalWabbit vw)
         {
             return new VowpalWabbitSingleExampleSerializer<TExample>(this, vw);
@@ -184,7 +191,7 @@ namespace VW.Serializer
 
         private void CreateLabel()
         {
-            // CODE if (labelParameter == null) 
+            // CODE if (labelParameter == null)
             this.perExampleBody.Add(Expression.IfThen(
                 Expression.NotEqual(this.labelParameter, Expression.Constant(null, typeof(ILabel))),
                 this.CreateMarshallerCall("MarshalLabel", this.contextParameter, this.labelParameter)));
@@ -205,9 +212,9 @@ namespace VW.Serializer
                         Expression.AndAlso(
                             Expression.Equal(this.labelParameter, Expression.Constant(null, typeof(ILabel))),
                             condition),
-                        // CODE MarshalLabel(context, example.Label) 
-                        this.CreateMarshallerCall("MarshalLabel", 
-                            this.contextParameter, 
+                        // CODE MarshalLabel(context, example.Label)
+                        this.CreateMarshallerCall("MarshalLabel",
+                            this.contextParameter,
                             label.ValueExpressionFactory(this.exampleParameter))));
             }
         }
@@ -321,6 +328,18 @@ namespace VW.Serializer
             return null;
         }
 
+        private bool ContainsAncestor(FeatureExpressionInternal candidate, List<FeatureExpressionInternal> validFeature)
+        {
+            if (candidate.Source.Parent == null)
+                return false;
+
+            if (validFeature.Any(valid => object.ReferenceEquals(valid.Source, candidate.Source.Parent)))
+                return true;
+
+            var parent = this.allFeatures.First(f => object.ReferenceEquals(f.Source, candidate.Source.Parent));
+            return ContainsAncestor(parent, validFeature);
+        }
+
         /// <summary>
         /// Resolve methods for each feature base on feature type and configuration.
         /// </summary>
@@ -329,6 +348,10 @@ namespace VW.Serializer
             var validFeature = new List<FeatureExpressionInternal>(this.allFeatures.Length);
             foreach (var feature in this.allFeatures)
             {
+                // skip any feature which parent feature is already resolved
+                if (ContainsAncestor(feature, validFeature))
+                    continue;
+
                 feature.MarshalMethod = this.ResolveFeatureMarshalMethod(feature.Source);
 
                 if (feature.MarshalMethod != null)

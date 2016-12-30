@@ -69,6 +69,7 @@ noinst_HEADERS = vowpalwabbit/accumulate.h \
 	vowpalwabbit/parse_regressor.h \
 	vowpalwabbit/print.h \
 	vowpalwabbit/rand48.h \
+	vowpalwabbit/recall_tree.h \
 	vowpalwabbit/reductions.h \
 	vowpalwabbit/scorer.h \
 	vowpalwabbit/search.h \
@@ -89,4 +90,4 @@ pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = libvw.pc libvw_c_wrapper.pc
 
 test: all
-	cd test && ./RunTests -f -E 0.001 ../vowpalwabbit/vw ../vowpalwabbit/vw
+	cd test && ./RunTests -d -f -E 0.001 ../vowpalwabbit/vw ../vowpalwabbit/vw

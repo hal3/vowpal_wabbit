@@ -85,7 +85,7 @@ void print_result(int f, float res, float, v_array<char> tag)
     if (floorf(res) != res)
       sprintf(temp, "%f", res);
     else
-      sprintf(temp, "%d", (uint32_t) res);
+      sprintf(temp, "%.0f", res);
     std::stringstream ss;
     ss << temp;
     print_tag(ss, tag);
@@ -110,24 +110,6 @@ void print_raw_text(int f, string s, v_array<char> tag)
   ssize_t t = io_buf::write_file_or_socket(f, ss.str().c_str(), (unsigned int)len);
   if (t != len)
   { cerr << "write error: " << strerror(errno) << endl;
-  }
-}
-
-void print_lda_result(vw& all, int f, float* res, float, v_array<char> tag)
-{ if (f >= 0)
-  { std::stringstream ss;
-    char temp[30];
-    for (size_t k = 0; k < all.lda; k++)
-    { sprintf(temp, "%f ", res[k]);
-      ss << temp;
-    }
-    print_tag(ss, tag);
-    ss << '\n';
-    ssize_t len = ss.str().size();
-    ssize_t t = io_buf::write_file_or_socket(f, ss.str().c_str(), (unsigned int)len);
-
-    if (t != len)
-      cerr << "write error: " << strerror(errno) << endl;
   }
 }
 
@@ -235,12 +217,13 @@ vw::vw()
 { sd = &calloc_or_throw<shared_data>();
   sd->dump_interval = 1.;   // next update progress dump
   sd->contraction = 1.;
-  sd->max_label = 1.;
-  sd->min_label = 0.;
+  sd->max_label = 0;
+  sd->min_label = 0;
 
   p = new_parser();
   p->emptylines_separate_examples = false;
   p->lp = simple_label;
+  label_type = label_type::simple;
 
   l = nullptr;
   scorer = nullptr;
@@ -259,7 +242,6 @@ vw::vw()
   bfgs = false;
   hessian_on = false;
   active = false;
-  reg.stride_shift = 0;
   num_bits = 18;
   default_bits = true;
   daemon = false;
@@ -322,7 +304,7 @@ vw::vw()
 
   add_constant = true;
   audit = false;
-  reg.weight_vector = nullptr;
+
   pass_length = (size_t)-1;
   passes_complete = 0;
 
@@ -344,8 +326,6 @@ vw::vw()
   // Set by the '--progress <arg>' option and affect sd->dump_interval
   progress_add = false;   // default is multiplicative progress dumps
   progress_arg = 2.0;     // next update progress dump multiplier
-
-  seeded = false; // default is not to share model states
 
   sd->report_multiclass_log_loss = false;
   sd->multiclass_log_loss = 0;

@@ -36,6 +36,12 @@ namespace cs_unittest
                 vw.Validate("", new ExampleString() { });
                 vw.Validate("", new ExampleString() { Location = "" });
             }
+
+            using (var vw = new VowpalWabbitExampleValidator<ExampleString4>(string.Empty))
+            {
+                vw.Validate("| VideoTitleRich_Homie_Quan_-_\"Blah_Blah_Blah\"___Behind_The_Scenes", new ExampleString4 { Value = "VideoTitleRich Homie Quan - \"Blah Blah Blah\" | Behind The Scenes" });
+                vw.Validate("| VideoTitleIt's_Official__Your_vibrator_Can_be_Hacked", new ExampleString4 { Value = "VideoTitleIt's Official: Your vibrator Can be Hacked" });
+            }
         }
 
         [TestMethod]
@@ -224,11 +230,16 @@ namespace cs_unittest
         [TestCategory("Marshal")]
         public void TestFeatureDiscoveryAll()
         {
-            using (var vw = new VowpalWabbitExampleValidator<POCO>(new VowpalWabbitSettings(featureDiscovery: VowpalWabbitFeatureDiscovery.All)))
+            using (var vw = new VowpalWabbitExampleValidator<POCO>(new VowpalWabbitSettings { TypeInspector = TypeInspector.All }))
             {
                 vw.Validate("| Feature1 Feature2:5", new POCO { Feature1 = true, Feature2 = 5 });
             }
         }
+    }
+
+    public class POCODict
+    {
+        public Dictionary<string, float> Features { get; set; }
     }
 
     public class POCO
@@ -380,6 +391,12 @@ namespace cs_unittest
     {
         [Feature(Namespace = "bc")]
         public string Location { get; set; }
+    }
+
+    public class ExampleString4
+    {
+        [Feature(StringProcessing = StringProcessing.Escape)]
+        public string Value { get; set; }
     }
 
     public enum Age

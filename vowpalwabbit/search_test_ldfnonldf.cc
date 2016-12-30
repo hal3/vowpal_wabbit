@@ -6,6 +6,8 @@ license as described in the file LICENSE.
 #include "search_test_ldfnonldf.h"
 #include "vw.h"
 
+using namespace std;
+
 namespace TestLDFNonLDFTask
 {
 Search::search_task task = { "ldfnonldf", run, initialize, nullptr, nullptr, nullptr };

@@ -17,7 +17,7 @@
 
 namespace CS=COST_SENSITIVE;
 
-
+using namespace std;
 
 namespace GenerateTask {
 const size_t max_input_length = 200;
@@ -850,7 +850,7 @@ action predict_alignment(Search::search& S, gen_data& G, vector<example*>& ec, s
 
   vw& vw_obj = S.get_vw_pointer_unsafe();
   uint64_t mask = S.get_mask();
-  uint64_t multiplier = vw_obj.wpp << vw_obj.reg.stride_shift;
+  uint64_t multiplier = vw_obj.wpp << vw_obj.weights.stride_shift();
   
   set<size_t>* oracle = nullptr;
   if (true || ((G.reference != nullptr) && (G.oracle_alignment || S.predictNeedsReference())))
@@ -976,7 +976,7 @@ action predict_word(Search::search& S, gen_data& G, vector<example*>& ec, size_t
   
   vw& vw_obj = S.get_vw_pointer_unsafe();
   uint64_t mask = S.get_mask();
-  uint64_t multiplier = vw_obj.wpp << vw_obj.reg.stride_shift;
+  uint64_t multiplier = vw_obj.wpp << vw_obj.weights.stride_shift();
   
   size_t N = min(ec.size(), max_input_length);
   Search::predictor& P = *G.P;

@@ -6,6 +6,8 @@ license as described in the file LICENSE.
  */
 ```
 
+<img src="/logo_assets/vowpal-wabbits-github-logo@3x.png" height="auto" width="100%" alt="Vowpal Wabbit">
+
 [![Build Status](https://travis-ci.org/JohnLangford/vowpal_wabbit.png)](https://travis-ci.org/JohnLangford/vowpal_wabbit)
 [![Windows Build Status](https://ci.appveyor.com/api/projects/status/github/JohnLangford/vowpal_wabbit?branch=master&svg=true)](https://ci.appveyor.com/project/JohnLangford/vowpal-wabbit)
 [![Coverage Status](https://coveralls.io/repos/JohnLangford/vowpal_wabbit/badge.svg)](https://coveralls.io/r/JohnLangford/vowpal_wabbit)
@@ -132,15 +134,16 @@ OSX requires _glibtools_, which is available via the [brew](http://brew.sh) or
 ```
 brew install vowpal-wabbit
 ```
-[The homebrew formula for VW is located on github](https://github.com/Homebrew/homebrew/blob/master/Library/Formula/vowpal-wabbit.rb).
+[The homebrew formula for VW is located on github](https://github.com/Homebrew/homebrew-core/blob/master/Formula/vowpal-wabbit.rb).
 
 ### Manual install ov Vowpal Wabbit
-#### OSX Dependencies (if using Brew): 
+#### OSX Dependencies (if using Brew):
 ```
 brew install libtool
 brew install autoconf
 brew install automake
-brew install boost --with-python
+brew install boost
+brew install boost-python
 ```
 
 #### OSX Dependencies (if using MacPorts):
@@ -159,7 +162,7 @@ $ port install boost +no_single +no_static +openmpi +python27
 *Mac OS X 10.8 and below*: ``configure.cxx_stdlib=libc++`` and ``configure.cxx=clang++`` ensure that ``clang++`` uses
 the correct C++11 functionality while building Boost. Ordinarily, ``clang++`` relies on the older GNU ``g++`` 4.2 series
 header files and ``stdc++`` library; ``libc++`` is the ``clang`` replacement that provides newer C++11 functionality. If
-these flags aren't present, you will likely encounter compilation errors when compiling _vowpalrabbit/cbify.cc_. These
+these flags aren't present, you will likely encounter compilation errors when compiling _vowpalwabbit/cbify.cc_. These
 error messages generally contain complaints about ``std::to_string`` and ``std::unique_ptr`` types missing.
 
 To compile:
@@ -173,6 +176,6 @@ $ make test    # (optional)
 
 To browse the code more easily, do
 
-make doc
+`make doc`
 
-and then point your browser to doc/html/index.html .
+and then point your browser to `doc/html/index.html`.
