@@ -101,7 +101,8 @@ void copy_label(void*dst, void*src)
 { if (dst && src)
   { label* ldD = (label*)dst;
     label* ldS = (label*)src;
-    copy_array(ldD->costs, ldS->costs);
+    //cerr << "cost_sensitive::copy_label to " << &(ldD->costs) << " from " << &(ldS->costs) << " within " << ldD << " and " << ldS << ", end to " << ldD->costs.end_array << " from " << ldS->costs.end_array  << " sizes " << ldD->costs.size() << " and " << ldS->costs.size() << endl;
+    copy_array_no_memcpy(ldD->costs, ldS->costs);
   }
 }
 
@@ -272,6 +273,7 @@ bool example_is_test(example& ec)
 
 bool ec_is_example_header(example& ec)  // example headers look like "0:-1" or just "shared"
 { v_array<COST_SENSITIVE::wclass>& costs = ec.l.cs.costs;
+  if (costs._begin == nullptr) return false;
   if (costs.size() != 1) return false;
   if (costs[0].class_index != 0) return false;
   if (costs[0].x != -FLT_MAX) return false;

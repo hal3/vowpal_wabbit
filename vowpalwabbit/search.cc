@@ -734,7 +734,7 @@ void add_example_conditioning(search_private& priv, example& ec, size_t conditio
       char name = condition_on_names[i+n];
       fid = fid * 328901 + 71933 * ((condition_on_actions[i+n].a + 349101) * (name + 38490137));
 
-      cdbg << "condition label " << ec.l.cs.costs[0].class_index << " on position " << i << "+" << n << ", name " << name << " action " << condition_on_actions[i+n].a << endl;
+      //cdbg << "condition label " << ec.l.cs.costs[0].class_index << " on position " << i << "+" << n << ", name " << name << " action " << condition_on_actions[i+n].a << endl;
 
       priv.dat_new_feature_ec  = &ec;
       priv.dat_new_feature_idx = fid * quadratic_constant;
@@ -971,7 +971,7 @@ template<class T> void push_at(v_array<T>& v, T item, size_t pos)
 action choose_oracle_action(search_private& priv, size_t ec_cnt, const action* oracle_actions, size_t oracle_actions_cnt, const action* allowed_actions, size_t allowed_actions_cnt, const float* allowed_actions_cost, uint32_t max_action_allowed)
 { action a = (action)-1;
   uint32_t A = (max_action_allowed == 0) ? priv.A : max_action_allowed;
-  if (priv.use_action_costs && (allowed_actions != nullptr))
+  if (priv.use_action_costs && (allowed_actions_cnt > 0))
   { size_t K = (allowed_actions == nullptr) ? A : allowed_actions_cnt;
     cdbg << "costs = ["; for (size_t k=0; k<K; k++) cdbg << ' ' << allowed_actions_cost[k]; cdbg << " ]" << endl;
     float min_cost = FLT_MAX;
@@ -1123,7 +1123,7 @@ action single_prediction_LDF(search_private& priv, example* ecs, size_t ec_cnt, 
   { this_cache = new v_array<action_cache>();
     *this_cache = v_init<action_cache>();
   }
-  vw& all = *priv.all;
+  //vw& all = *priv.all;
   for (action a= (uint32_t)start_K; a<ec_cnt; a++)
   { cdbg << "== single_prediction_LDF a=" << a << "==" << endl;
     if (start_K > 0)
@@ -1344,16 +1344,18 @@ void generate_training_example(search_private& priv, polylabel& losses, float we
 
       int32_t old_skip_reduction_layer = priv.learn_ec_ref[0].skip_reduction_layer;
       for (action a= (uint32_t)start_K; a<priv.learn_ec_ref_cnt; a++)
-      { example& ec = priv.learn_ec_ref[a];
+      { example& ec = priv.learn_ec_ref                                       [a];
         ec.skip_reduction_layer = skip_reduction_layer;
 
         CS::label& lab = ec.l.cs;
-        if (lab.costs.size() == 0)
+        cdbg << "[a " << priv.is_ldf << " " << lab.costs._begin << ' ' << lab.costs._end << ' ' << lab.costs.size() <<  "]" << endl;
+        if (lab.costs.size() == 0 || lab.costs._begin == nullptr)
         { CS::wclass wc = { 0., a - (uint32_t)start_K, 0., 0. };
           lab.costs.push_back(wc);
+          cdbg << "[b]" << endl;
         }
         lab.costs[0].x = losses.cs.costs[a-start_K].x;
-        //cerr << "cost[" << a << "] = " << losses[a] << " - " << min_loss << " = " << lab.costs[0].x << endl;
+        //cdbg << "cost[" << a << "] = " << losses[a] << " - " << min_loss << " = " << lab.costs[0].x << endl;
         ec.in_use = true;
         uint64_t old_offset = ec.ft_offset;
         ec.ft_offset = priv.offset;
@@ -1524,10 +1526,12 @@ action search_predict(search_private& priv, example* ecs, size_t ec_cnt, ptag my
       else
       { size_t label_size = priv.is_ldf ? sizeof(CS::label) : sizeof(MC::label_t);  // TODO we can do this better
         void (*label_copy_fn)(void*,void*) = priv.is_ldf ? CS::cs_label.copy_label : nullptr;
-
+        cdbg << "copying examples, is_ldf = " << priv.is_ldf << endl;
         ensure_size(priv.learn_ec_copy, ec_cnt);
         for (size_t i=0; i<ec_cnt; i++)
+        { //cerr << "copy " << i << "/" << ec_cnt << ", from=" << priv.learn_ec_copy.begin()+i << ", to=" << ecs+i << endl;
           VW::copy_example_data(priv.all->audit, priv.learn_ec_copy.begin()+i, ecs+i, label_size, label_copy_fn);
+        }
 
         priv.learn_ec_ref = priv.learn_ec_copy.begin();
       }
@@ -1943,7 +1947,9 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
 
   // if there's nothing to train on, we're done!
   if ((priv.loss_declared_cnt == 0) || (priv.t+priv.meta_t == 0) || (priv.rollout_method == NO_ROLLOUT))  // TODO: make sure NO_ROLLOUT works with beam!
-  { return;
+  { cdbg << "====================================== SKIPPING LEARN ======================================" << endl;
+    cdbg << disp(priv.loss_declared_cnt) << disp(priv.t) << disp(priv.meta_t) << disp(priv.rollout_method) << endl;
+    return;
   }
 
   // otherwise, we have some learn'in to do!
@@ -2005,10 +2011,27 @@ void train_single_example(search& sch, bool is_test_ex, bool is_holdout_ex)
     //    min_loss = MIN(min_loss, priv.memo_foreach_action[tid]->get(aid).cost);
     generate_training_example(priv, priv.learn_losses, 1., true); // , min_loss);  // TODO: weight
     if (! priv.examples_dont_change)
+    { cdbg << "deleting labels, is_ldf = " << sch.priv->is_ldf << endl;
       for (size_t n=0; n<priv.learn_ec_copy.size(); n++)
-      { if (sch.priv->is_ldf) CS::cs_label.delete_label(&priv.learn_ec_copy[n].l.cs);
-        else                  MC::mc_label.delete_label(&priv.learn_ec_copy[n].l.multi);
+      { //priv.learn_ec_copy[n].l.cs.costs.erase();
+        if (sch.priv->is_ldf) {
+          CS::cs_label.delete_label(&priv.learn_ec_copy[n].l.cs);
+          priv.learn_ec_copy[n].l.cs.costs._begin = nullptr;
+          priv.learn_ec_copy[n].l.cs.costs._end = nullptr;
+          priv.learn_ec_copy[n].l.cs.costs.end_array = nullptr;
+        } else {
+          priv.learn_ec_copy[n].l.multi.label = 0;
+          priv.learn_ec_copy[n].l.multi.weight = 0.;
+        }
+          priv.learn_ec_copy[n].l.cs.costs._begin = nullptr;
+          priv.learn_ec_copy[n].l.cs.costs._end = nullptr;
+          priv.learn_ec_copy[n].l.cs.costs.end_array = nullptr;
+        cdbg << "[c " << priv.is_ldf << " " << priv.learn_ec_copy[n].l.cs.costs._begin << ' ' << priv.learn_ec_copy[n].l.cs.costs._end << ' ' << priv.learn_ec_copy[n].l.cs.costs.size() <<  "]" << endl;
       }
+      //      { //if (sch.priv->is_ldf) CS::cs_label.delete_label(&priv.learn_ec_copy[n].l.cs);
+      //        //else                  MC::mc_label.delete_label(&priv.learn_ec_copy[n].l.multi);
+      //}
+    }
     if (priv.cb_learner) priv.learn_losses.cb.costs.erase();
     else                 priv.learn_losses.cs.costs.erase();
   }
@@ -2181,7 +2204,7 @@ void do_actual_learning(vw&all, search& sch)  // first, might need to figure out
   { // we need to inspect the first example to see which task this is
     int32_t task_id = get_multitask_id(priv.ec_seq);
     if (task_id > 0)
-    { if (task_id > priv.multitask->size())
+    { if (task_id > (int32_t)priv.multitask->size())
       { std::cerr << "warning: unknown task id " << task_id << " at " << priv.ec_seq[0]->example_counter << "; setting task 1" << std::endl;
         task_id = 1;
       }
@@ -3119,7 +3142,8 @@ string search::pretty_label(action a)
   
 void search::ldf_alloc(size_t numExamples)
 { if (priv->task->alloced_ldf_examples == nullptr)
-  { priv->task->alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
+  { cdbg << "ldf_alloc: not yet alloced, allocing " << numExamples << " with label size " << sizeof(CS::label) << endl;
+    priv->task->alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
     priv->task->alloced_ldf_examples_count = numExamples;
     for (size_t a=0; a<numExamples; a++)
     { CS::label& lab = priv->task->alloced_ldf_examples[a].l.cs;
@@ -3130,14 +3154,24 @@ void search::ldf_alloc(size_t numExamples)
     return;
   }
   // otherwise, already alloced
-  if (numExamples == priv->task->alloced_ldf_examples_count) return;  // phew!
+  if (numExamples == priv->task->alloced_ldf_examples_count)
+  { cdbg << "ldf_alloc: already alloced, right size, checking costs...";
+    for (size_t a=0; a<numExamples; a++)
+    { CS::label& lab = priv->task->alloced_ldf_examples[a].l.cs;
+      cdbg << " " << a << ':' << lab.costs[0].class_index << ':' << lab.costs[0].x;
+    }
+    cdbg << endl;
+    return;  // phew!
+  }
   if (numExamples <  priv->task->alloced_ldf_examples_count)
-  { for (size_t a=numExamples; a<priv->task->alloced_ldf_examples_count; a++)
+  { cdbg << "ldf_alloc: reducing number of alloced examples!" << endl;
+    for (size_t a=numExamples; a<priv->task->alloced_ldf_examples_count; a++)
       VW::dealloc_example(CS::cs_label.delete_label, priv->task->alloced_ldf_examples[a]);
     priv->task->alloced_ldf_examples_count = numExamples;
     return;
   }
   // finally, we want MORE examples!
+  cdbg << "ldf_alloc: allocing _more_ examples!" << endl;
   example* old_ex = priv->task->alloced_ldf_examples;
   size_t   old_cnt = priv->task->alloced_ldf_examples_count;
   priv->task->alloced_ldf_examples = VW::alloc_examples(sizeof(CS::label), numExamples);
@@ -3169,6 +3203,7 @@ void search::ldf_set_label(size_t i, action a, float cost)
 { if (i >= priv->task->alloced_ldf_examples_count)
     THROW("search::ldf_set_label on example greater than count");
   CS::label& lab = priv->task->alloced_ldf_examples[i].l.cs;
+  cdbg << "ldf_set_label: costs=" << &lab.costs << " size=" << lab.costs.size() << " begin=" << lab.costs._begin << endl;
   if (lab.costs.size() == 0) {
     CS::wclass wclass = { cost, a, 0., 0. };
     lab.costs.push_back(wclass);
@@ -3179,6 +3214,7 @@ void search::ldf_set_label(size_t i, action a, float cost)
     lab.costs[0].partial_prediction = 0.;
     lab.costs[0].wap_value = 0.;
   }
+  cdbg << "ldf_set_label i=" << i << " size=" << lab.costs.size() << " lab=" << &lab << " costs=" << &lab.costs << " costs[0]=" << &lab.costs[0] << " .x=" << lab.costs[0].x << endl;
 }
 
 action search::ldf_get_label(size_t i)
