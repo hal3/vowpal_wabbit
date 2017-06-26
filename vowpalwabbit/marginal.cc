@@ -350,7 +350,7 @@ LEARNER::base_learner* marginal_setup(vw& all)
   new(&d.marginals)unordered_map<uint64_t,marginal>();
   new(&d.expert_state)unordered_map<uint64_t,expert_pair>();
 
-  LEARNER::learner<data>& ret =
+  LEARNER::learner<MARGINAL::data>& ret =
     init_learner(&d, setup_base(all), predict_or_learn<true>, predict_or_learn<false>);
   ret.set_finish(finish);
   ret.set_save_load(save_load);
