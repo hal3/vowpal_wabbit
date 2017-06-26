@@ -26,9 +26,9 @@ namespace VW
     (1) Some commandline parameters do not make sense as a library.
     (2) The code is not yet reentrant.
    */
-vw* initialize(std::string s, io_buf* model=nullptr, bool skipModelLoad=false);
-vw* initialize(int argc, char* argv[], io_buf* model=nullptr, bool skipModelLoad = false);
-vw* seed_vw_model(vw* vw_model, std::string extra_args);
+vw* initialize(std::string s, io_buf* model=nullptr, bool skipModelLoad=false, trace_message_t trace_listener = nullptr, void* trace_context = nullptr);
+vw* initialize(int argc, char* argv[], io_buf* model=nullptr, bool skipModelLoad = false, trace_message_t trace_listener = nullptr, void* trace_context = nullptr);
+vw* seed_vw_model(vw* vw_model, std::string extra_args, trace_message_t trace_listener = nullptr, void* trace_context = nullptr);
 
 void cmd_string_replace_value( std::stringstream*& ss, std::string flag_to_replace, std::string new_value );
 
@@ -87,6 +87,7 @@ uint32_t* get_multilabel_predictions(example* ec, size_t& len);
 size_t get_tag_length(example* ec);
 const char* get_tag(example* ec);
 size_t get_feature_number(example* ec);
+float get_confidence(example* ec);
 feature* get_features(vw& all, example* ec, size_t& feature_number);
 void return_features(feature* f);
 
@@ -147,17 +148,14 @@ inline uint32_t hash_feature_cstr(vw& all, char* fstr, unsigned long u)
 }
 
 inline float get_weight(vw& all, uint32_t index, uint32_t offset)
-{ return all.weights[(index << all.weights.stride_shift()) + offset];
-}
+{ return (&all.weights[index << all.weights.stride_shift()])[offset]; }
 
 inline void set_weight(vw& all, uint32_t index, uint32_t offset, float value)
-{ all.weights[(index << all.weights.stride_shift()) + offset] = value;
-}
+{ (&all.weights[index << all.weights.stride_shift()])[offset] = value; }
 
 inline uint32_t num_weights(vw& all)
 { return (uint32_t)all.length();}
 
 inline uint32_t get_stride(vw& all)
-{ return (uint32_t)(1 << all.weights.stride_shift());
-}
+{ return all.weights.stride(); }
 }

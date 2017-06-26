@@ -25,44 +25,58 @@ using namespace std;
 #include "vw_validate.h"
 #include "vw_versions.h"
 
-
-struct initial_weight
+template <class T> class set_initial_wrapper 
 {
-private:
-  weight _initial;
 public:
-  initial_weight(weight initial) : _initial(initial) {}
-  void operator()(weight_parameters::iterator& iter, uint64_t /*index*/)
-  { *iter = _initial;
-  }
+    static void func(typename T::iterator& iter, float& initial) { *iter = initial; }    
 };
-void random_positive(weight_parameters::iterator& iter, uint64_t ind)
-{ *iter = (float)(0.1 * merand48(ind));
-}
+	
+template <class T> class random_positive_wrapper 
+{
+public:
+   static void func(typename T::iterator& iter)
+    {
+      uint64_t index = iter.index();
+      *iter = (float)(0.1 * merand48(index));
+    }
+};
 
-void random_weights(weight_parameters::iterator& iter, uint64_t ind)
-{ *iter = (float)(merand48(ind) - 0.5);
-}
-void initialize_regressor(vw& all)
+template <class T> class random_weights_wrapper
+{
+public:    
+    static void func(typename T::iterator& iter)
+    {
+      uint64_t index = iter.index();
+      *iter = (float)(merand48(index) - 0.5);
+    }
+};
+
+template<class T> void initialize_regressor(vw& all, T& weights)
 { // Regressor is already initialized.
-  if (all.weights.not_null())
+  if (weights.not_null())
     return;
   size_t length = ((size_t)1) << all.num_bits;
   try
-  { new(&all.weights) weight_parameters(length, all.weights.stride_shift()); }
+    { new(&weights) T(length, weights.stride_shift()); }
   catch (VW::vw_exception anExc)
-  { THROW(" Failed to allocate weight array with " << all.num_bits << " bits: try decreasing -b <bits>");
-  }
-  if (!all.weights.not_null())
-  { THROW(" Failed to allocate weight array with " << all.num_bits << " bits: try decreasing -b <bits>"); }
+    { THROW(" Failed to allocate weight array with " << all.num_bits << " bits: try decreasing -b <bits>");
+    }
+  if (weights.mask() == 0)
+    { THROW(" Failed to allocate weight array with " << all.num_bits << " bits: try decreasing -b <bits>"); }
   else if (all.initial_weight != 0.)
-  { initial_weight init(all.initial_weight);
-    all.weights.set_default<initial_weight>(init);
-  }
+    weights.template set_default<float,set_initial_wrapper<T> >(all.initial_weight);
   else if (all.random_positive_weights)
-    all.weights.set_default<random_positive>();
+    weights.template set_default<random_positive_wrapper<T> >();
   else if (all.random_weights)
-    all.weights.set_default<random_weights>();
+    weights.template set_default<random_weights_wrapper<T> >();
+}
+
+void initialize_regressor(vw& all)
+{
+  if (all.weights.sparse)
+    initialize_regressor(all, all.weights.sparse_weights);
+  else
+    initialize_regressor(all, all.weights.dense_weights);
 }
 
 const size_t default_buf_size = 512;
@@ -126,7 +140,7 @@ void save_load_header(vw& all, io_buf& model_file, bool read, bool text)
       if (all.model_file_ver >= VERSION_FILE_WITH_HEADER_ID)
       { v_length = (uint32_t)all.id.length() + 1;
 
-        msg << "Id" << all.id << "\n";
+        msg << "Id " << all.id << "\n";
         memcpy(buff2, all.id.c_str(), min(v_length, default_buf_size));
         if (read)
           v_length = default_buf_size;
@@ -289,7 +303,7 @@ void save_load_header(vw& all, io_buf& model_file, bool read, bool text)
             all.args.push_back(temp.str());
           }
           else
-            cerr << "WARNING: this model file contains 'rank: " << rank << "' value but it will be ignored as another value specified via the command line." << endl;
+            all.trace_message << "WARNING: this model file contains 'rank: " << rank << "' value but it will be ignored as another value specified via the command line." << endl;
         }
 
       }
@@ -466,9 +480,9 @@ void parse_regressor_args(vw& all, io_buf& io_temp)
   if (regs.size() > 0)
   { io_temp.open_file(regs[0].c_str(), all.stdin_off, io_buf::READ);
     if (!all.quiet)
-    { //cerr << "initial_regressor = " << regs[0] << endl;
+    { //all.trace_message << "initial_regressor = " << regs[0] << endl;
       if (regs.size() > 1)
-      { cerr << "warning: ignoring remaining " << (regs.size() - 1) << " initial regressors" << endl;
+      { all.trace_message << "warning: ignoring remaining " << (regs.size() - 1) << " initial regressors" << endl;
       }
     }
   }
@@ -503,8 +517,7 @@ void parse_mask_regressor_args(vw& all)
       io_temp.close_file();
 
       // Re-zero the weights, in case weights of initial regressor use different indices
-      weight_parameters& weights = all.weights;
-      weights.set_zero(0);
+      all.weights.set_zero(0);
     }
     else
     { // If no initial regressor, just clear out the options loaded from the header.

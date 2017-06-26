@@ -279,7 +279,11 @@ void make_single_prediction(ldf& data, base_learner& base, example& ec)
 }
 
 bool check_ldf_sequence(ldf& data, size_t start_K)
-{ bool isTest = COST_SENSITIVE::example_is_test(*data.ec_seq[start_K]);
+{ bool isTest;
+  if (start_K == data.ec_seq.size())
+    isTest = true;
+  else
+    isTest = COST_SENSITIVE::example_is_test(*data.ec_seq[start_K]);
   for (size_t k=start_K; k<data.ec_seq.size(); k++)
   { example *ec = data.ec_seq[k];
     // Each sub-example must have just one cost
@@ -287,7 +291,7 @@ bool check_ldf_sequence(ldf& data, size_t start_K)
 
     if (COST_SENSITIVE::example_is_test(*ec) != isTest)
     { isTest = true;
-      cerr << "warning: ldf example has mix of train/test data; assuming test" << endl;
+      data.all->trace_message << "warning: ldf example has mix of train/test data; assuming test" << endl;
     }
     if (ec_is_example_header(*ec))
       THROW("warning: example headers at position " << k << ": can only have in initial position!");
@@ -478,8 +482,8 @@ void do_actual_learning(ldf& data, base_learner& base)
   else
   { // Mark the predicted subexample with its class_index, all other with 0
     for (size_t k=start_K; k<K; k++)
-    { if (k == predicted_K)
-        data.ec_seq[k]->pred.multiclass =  data.ec_seq[k]->l.cs.costs[0].class_index;
+      { if (k == predicted_K)
+	  data.ec_seq[k]->pred.multiclass =  data.ec_seq[k]->l.cs.costs[0].class_index;
       else
         data.ec_seq[k]->pred.multiclass =  0;
     }
@@ -751,7 +755,7 @@ void predict_or_learn(ldf& data, base_learner& base, example &ec)
   }
   else if ((example_is_newline(ec) && is_test_ec) || need_to_break)
   { if (need_to_break && data.first_pass)
-      cerr << "warning: length of sequence at " << ec.example_counter << " exceeds ring size; breaking apart" << endl;
+      data.all->trace_message << "warning: length of sequence at " << ec.example_counter << " exceeds ring size; breaking apart" << endl;
     for (auto& ec2 : data.ec_seq) ec2->skip_reduction_layer = ec.skip_reduction_layer;
     do_actual_learning<is_learn>(data, base);
     data.need_to_clear = true;
@@ -831,9 +835,9 @@ base_learner* csldf_setup(vw& all)
     all.sd->report_multiclass_log_loss = true;
     *all.file_options << " --probabilities";
     if (!vm.count("loss_function") || vm["loss_function"].as<string>() != "logistic" )
-      cerr << "WARNING: --probabilities should be used only with --loss_function=logistic" << endl;
+      all.trace_message << "WARNING: --probabilities should be used only with --loss_function=logistic" << endl;
     if (!ld.treat_as_classifier)
-      cerr << "WARNING: --probabilities should be used with --csoaa_ldf=mc (or --oaa)" << endl;
+      all.trace_message << "WARNING: --probabilities should be used with --csoaa_ldf=mc (or --oaa)" << endl;
   }
   else
   { ld.is_probabilities = false;
@@ -850,11 +854,11 @@ base_learner* csldf_setup(vw& all)
   prediction_type::prediction_type_t pred_type;
 
   if (ld.rank)
-    pred_type = prediction_type::multiclass;
+    pred_type = prediction_type::action_scores;
   else if (ld.is_probabilities)
     pred_type = prediction_type::prob;
   else
-    pred_type = prediction_type::action_scores;
+    pred_type = prediction_type::multiclass;
 
   ld.read_example_this_loop = 0;
   ld.need_to_clear = false;

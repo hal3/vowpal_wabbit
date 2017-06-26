@@ -209,9 +209,11 @@ void insert_example_at_node (recall_tree& b, uint32_t cn, example& ec)
 // TODO: handle if features already in this namespace
 
 void add_node_id_feature (recall_tree& b, uint32_t cn, example& ec)
-{ vw* all = b.all;
+{
+  vw* all = b.all;
   uint64_t mask = all->weights.mask();
   size_t ss = all->weights.stride_shift();
+
   ec.indices.push_back (node_id_namespace);
   features& fs = ec.feature_space[node_id_namespace];
 
@@ -376,7 +378,7 @@ void learn (recall_tree& b, base_learner& base, example& ec)
     { float which = train_node (b, base, ec, cn);
 
       if (b.randomized_routing)
-        which = (frand48 () > to_prob (which) ? -1.f : 1.f);
+	which = (merand48(b.all->random_state) > to_prob (which) ? -1.f : 1.f);
 
       uint32_t newcn = descend (b.nodes[cn], which);
       bool cond = stop_recurse_check (b, cn, newcn);
@@ -552,7 +554,7 @@ base_learner* recall_tree_setup(vw& all)
   init_tree (tree);
 
   if (! all.quiet)
-    std::cerr << "recall_tree:"
+    all.trace_message << "recall_tree:"
               << " node_only = " << tree.node_only
               << " bern_hyper = " << tree.bern_hyper
               << " max_depth = " << tree.max_depth

@@ -101,7 +101,7 @@ void predict_or_learn(oaa& o, LEARNER::base_learner& base, example& ec)
       { ec.pred.scalars[i] =  1.f / (1.f + exp(- o.pred[i].scalar));
         sum_prob += ec.pred.scalars[i];
       }
-      float inv_sum_prob = 1. / sum_prob;
+      float inv_sum_prob = 1.f / sum_prob;
       for(uint32_t i =0; i< o.k; i++)
         ec.pred.scalars[i] *= inv_sum_prob;
     }
@@ -211,13 +211,13 @@ LEARNER::base_learner* oaa_setup(vw& all)
   { data.num_subsample = all.vm["oaa_subsample"].as<size_t>();
     if (data.num_subsample >= data.k)
     { data.num_subsample = 0;
-      cerr << "oaa is turning off subsampling because your parameter >= K" << endl;
+      all.trace_message << "oaa is turning off subsampling because your parameter >= K" << endl;
     }
     else
     { data.subsample_order = calloc_or_throw<uint32_t>(data.k);
       for (size_t i=0; i<data.k; i++) data.subsample_order[i] = (uint32_t) i;
       for (size_t i=0; i<data.k; i++)
-      { size_t j = (size_t)(frand48() * (float)(data.k-i)) + i;
+      { size_t j = (size_t)(merand48(all.random_state) * (float)(data.k-i)) + i;
         uint32_t tmp = data.subsample_order[i];
         data.subsample_order[i] = data.subsample_order[j];
         data.subsample_order[j] = tmp;
@@ -230,7 +230,7 @@ LEARNER::base_learner* oaa_setup(vw& all)
   { all.delete_prediction = delete_scalars;
     if (all.vm.count("probabilities"))
     { if (!all.vm.count("loss_function") || all.vm["loss_function"].as<string>() != "logistic" )
-        cerr << "WARNING: --probabilities should be used only with --loss_function=logistic" << endl;
+        all.trace_message << "WARNING: --probabilities should be used only with --loss_function=logistic" << endl;
       // the three boolean template parameters are: is_learn, print_all and scores
       l = &LEARNER::init_multiclass_learner(data_ptr, setup_base(all), predict_or_learn<true, false, true, true>,
                                             predict_or_learn<false, false, true, true>, all.p, data.k, prediction_type::scalars);

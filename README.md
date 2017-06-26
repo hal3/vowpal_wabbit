@@ -20,6 +20,7 @@ These prerequisites are usually pre-installed on many platforms. However, you ma
 manager (*yum*, *apt*, *MacPorts*, *brew*, ...) to install missing software.
 
 - [Boost](http://www.boost.org) library, with the `Boost::Program_Options` library option enabled.
+- The zlib compression library + headers. In linux distros: package `zlib-devel` (Red Hat/CentOS), or `zlib1g-dev` (Ubuntu/Debian)
 - lsb-release  (RedHat/CentOS: redhat-lsb-core, Debian: lsb-release, Ubuntu: you're all set, OSX: not required)
 - GNU *autotools*: *autoconf*, *automake*, *libtool*, *autoheader*, et. al. This is not a strict prereq. On many systems (notably Ubuntu with `libboost-program-options-dev` installed), the provided `Makefile` works fine.
 - (optional) [git](http://git-scm.com) if you want to check out the latest version of *vowpal wabbit*,
@@ -59,8 +60,11 @@ Note that `./autogen.sh` requires *automake* (see the prerequisites, above.)
 `./autogen.sh`'s command line arguments are passed directly to `configure` as
 if they were `configure` arguments and flags.
 
-Note that `./autogen.sh` will overwrite the supplied `Makefile`, so
-keeping a copy of `Makefile` may be a good idea before running `autogen.sh`.
+Note that `./autogen.sh` will overwrite the supplied `Makefile`, including the `Makefile`s in sub-directories, so
+keeping a copy of the `Makefile`s may be a good idea before running `autogen.sh`. If your original `Makefile`s were overwritten by `autogen.sh` calling `automake`, you may always get the originals back from git using:
+```
+git checkout Makefile */Makefile
+```
 
 Be sure to read the wiki: https://github.com/JohnLangford/vowpal_wabbit/wiki
 for the tutorial, command line options, etc.
@@ -136,7 +140,7 @@ brew install vowpal-wabbit
 ```
 [The homebrew formula for VW is located on github](https://github.com/Homebrew/homebrew-core/blob/master/Formula/vowpal-wabbit.rb).
 
-### Manual install ov Vowpal Wabbit
+### Manual install of Vowpal Wabbit
 #### OSX Dependencies (if using Brew):
 ```
 brew install libtool
@@ -172,8 +176,23 @@ $ make
 $ make test    # (optional)
 ```
 
-## Code Documentation
+#### OSX Python Binding installation with Anaconda
+When using Anaconda as the source for Python the default Boost libraries used in the Makefile need to be adjusted. Below are the steps needed to install the Python bindings for VW. This should work for Python 2 and 3. Adjust the directories to match where anaconda is installed.
 
+```
+# create anaconda environment with boost
+conda create --name vw boost
+source activate vw
+git clone https://github.com/JohnLangford/vowpal_wabbit.git
+cd vowpal_wabbit
+# edit Makefile
+# change BOOST_INCLUDE to use anaconda env dir: /anaconda/envs/vw/include
+# change BOOST_LIBRARY to use anaconda lib dir: /andaconda/envs/vw/lib
+cd python
+python setup.py install
+```
+
+## Code Documentation
 To browse the code more easily, do
 
 `make doc`

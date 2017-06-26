@@ -12,7 +12,7 @@ using Microsoft.ServiceBus.Messaging;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace VowpalWabbit.Azure.Trainer
+namespace VW.Azure.Trainer
 {
     internal sealed class LearnEventProcessor : IEventProcessor
     {
@@ -39,7 +39,7 @@ namespace VowpalWabbit.Azure.Trainer
                 new Dictionary<string, string>
                 {
                     { "PartitionId", context.Lease.PartitionId },
-                    { "Offset", context.Lease.Offset.ToString() }
+                    { "Offset", context.Lease.Offset }
                 });
 
             this.perfCounters.EventHub_Processors.Increment();

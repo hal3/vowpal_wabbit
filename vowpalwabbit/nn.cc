@@ -77,12 +77,18 @@ void finish_setup (nn& n, vw& all)
   features& fs = n.output_layer.feature_space[nn_output_namespace];
   for (unsigned int i = 0; i < n.k; ++i)
   { fs.push_back(1., nn_index);
+    if (all.audit || all.hash_inv) {
+      std::stringstream ss;
+      ss << "OutputLayer" << i;
+      fs.space_names.push_back(audit_strings_ptr(new audit_strings("", ss.str())));
+    }
     nn_index += (uint64_t)n.increment;
   }
   n.output_layer.num_features += n.k;
 
   if (! n.inpass)
   { fs.push_back(1.,nn_index);
+    if (all.audit || all.hash_inv) fs.space_names.push_back(audit_strings_ptr(new audit_strings("", "OutputLayerConst")));
     ++n.output_layer.num_features;
   }
 
@@ -92,6 +98,7 @@ void finish_setup (nn& n, vw& all)
   memset (&n.hiddenbias, 0, sizeof (n.hiddenbias));
   n.hiddenbias.indices.push_back(constant_namespace);
   n.hiddenbias.feature_space[constant_namespace].push_back(1,(uint64_t)constant);
+  if (all.audit || all.hash_inv) n.hiddenbias.feature_space[constant_namespace].space_names.push_back(audit_strings_ptr(new audit_strings("", "HiddenBias")));
   n.hiddenbias.total_sum_feat_sq++;
   n.hiddenbias.l.simple.label = FLT_MAX;
   n.hiddenbias.weight = 1;
@@ -101,6 +108,7 @@ void finish_setup (nn& n, vw& all)
   n.outputweight.indices.push_back(nn_output_namespace);
   features& outfs = n.output_layer.feature_space[nn_output_namespace];
   n.outputweight.feature_space[nn_output_namespace].push_back(outfs.values[0],outfs.indicies[0]);
+  if (all.audit || all.hash_inv) n.outputweight.feature_space[nn_output_namespace].space_names.push_back(audit_strings_ptr(new audit_strings("", "OutputWeight")));
   n.outputweight.feature_space[nn_output_namespace].values[0] = 1;
   n.outputweight.total_sum_feat_sq++;
   n.outputweight.l.simple.label = FLT_MAX;
@@ -158,7 +166,7 @@ void predict_or_learn_multi(nn& n, base_learner& base, example& ec)
     for (unsigned int i = 0; i < n.k; ++i)
       // avoid saddle point at 0
       if (hiddenbias_pred[i].scalar == 0)
-      { n.hiddenbias.l.simple.label = (float) (frand48 () - 0.5);
+      { n.hiddenbias.l.simple.label = (float) (merand48(n.all->random_state) - 0.5);
         base.learn(n.hiddenbias, i);
         n.hiddenbias.l.simple.label = FLT_MAX;
       }
@@ -222,7 +230,7 @@ CONVERSE: // That's right, I'm using goto.  So sue me.
     // avoid saddle point at 0
     if (wf == 0)
     { float sqrtk = sqrt ((float)n.k);
-      n.outputweight.l.simple.label = (float) (frand48 () - 0.5) / sqrtk;
+      n.outputweight.l.simple.label = (float) (merand48(n.all->random_state) - 0.5) / sqrtk;
       base.update(n.outputweight, n.k);
       n.outputweight.l.simple.label = FLT_MAX;
     }

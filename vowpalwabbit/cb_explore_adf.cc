@@ -121,56 +121,63 @@ void predict_or_learn_first(cb_explore_adf& data, base_learner& base, v_array<ex
   CB_EXPLORE::safety(preds, data.epsilon, true);
 }
 
-template <bool is_learn>
-void predict_or_learn_greedy(cb_explore_adf& data, base_learner& base, v_array<example*>& examples)
-{ //Explore uniform random an epsilon fraction of the time.
-  if (is_learn && test_adf_sequence(data.ec_seq) != nullptr)
-    multiline_learn_or_predict<true>(base, examples, data.offset);
-  else
-    multiline_learn_or_predict<false>(base, examples, data.offset);
-
-  v_array<action_score>& preds = examples[0]->pred.a_s;
-  uint32_t num_actions = (uint32_t)preds.size();
-  float prob = data.epsilon/(float)num_actions;
-  for (size_t i = 0; i < num_actions; i++)
-    preds[i].score = prob;
-  preds[0].score += 1.f - data.epsilon;
-}
-
-template <bool is_learn>
-void predict_or_learn_bag(cb_explore_adf& data, base_learner& base, v_array<example*>& examples)
-{ //Randomize over predictions from a base set of predictors
-  v_array<action_score>& preds = examples[0]->pred.a_s;
-  uint32_t num_actions = (uint32_t)(examples.size() - 1);
-  if (CB::ec_is_example_header(*examples[0]))
-    num_actions--;
-
-  data.action_probs.resize(num_actions);
-  data.action_probs.erase();
-  for (uint32_t i = 0; i < num_actions; i++)
-    data.action_probs.push_back({ i,0. });
-  float prob = 1.f / (float)data.bag_size;
-  bool test_sequence = test_adf_sequence(data.ec_seq) == nullptr;
-  for (uint32_t i = 0; i < data.bag_size; i++)
-  { uint32_t count = BS::weight_gen();
-    if (is_learn && count > 0 && !test_sequence)
-      multiline_learn_or_predict<true>(base, examples, data.offset, i);
+  template <bool is_learn>
+  void predict_or_learn_greedy(cb_explore_adf& data, base_learner& base, v_array<example*>& examples)
+  { //Explore uniform random an epsilon fraction of the time.
+    if (is_learn && test_adf_sequence(data.ec_seq) != nullptr)
+      multiline_learn_or_predict<true>(base, examples, data.offset);
     else
-      multiline_learn_or_predict<false>(base, examples, data.offset, i);
-    assert(preds.size() == num_actions);
-    data.action_probs[preds[0].action].score += prob;
-    if (is_learn && !test_sequence)
-      for (uint32_t j = 1; j < count; j++)
-        multiline_learn_or_predict<true>(base, examples, data.offset, i);
+      multiline_learn_or_predict<false>(base, examples, data.offset);
+    
+    v_array<action_score>& preds = examples[0]->pred.a_s;
+    uint32_t num_actions = (uint32_t)preds.size();
+    float prob = data.epsilon/(float)num_actions;
+    for (size_t i = 0; i < num_actions; i++)
+      preds[i].score = prob;
+    preds[0].score += 1.f - data.epsilon;
   }
+  
+  template <bool is_learn>
+  void predict_or_learn_bag(cb_explore_adf& data, base_learner& base, v_array<example*>& examples)
+  { //Randomize over predictions from a base set of predictors
+    v_array<action_score>& preds = examples[0]->pred.a_s;
+    uint32_t num_actions = (uint32_t)(examples.size() - 1);
+    if (CB::ec_is_example_header(*examples[0]))
+      num_actions--;
+    if (num_actions == 0)
+      {
+	preds.erase();
+	return;
+      }
 
-  CB_EXPLORE::safety(data.action_probs, data.epsilon, true);
-  qsort((void*) data.action_probs.begin(), data.action_probs.size(), sizeof(action_score), reverse_order);
-
-  for (size_t i = 0; i < num_actions; i++)
-    preds[i] = data.action_probs[i];
-}
-
+    data.action_probs.resize(num_actions);
+    data.action_probs.erase();
+    for (uint32_t i = 0; i < num_actions; i++)
+      data.action_probs.push_back({ i,0. });
+    float prob = 1.f / (float)data.bag_size;
+    bool test_sequence = test_adf_sequence(data.ec_seq) == nullptr;
+    for (uint32_t i = 0; i < data.bag_size; i++) 
+      {
+		// avoid updates to the random num generator
+	uint32_t count = is_learn ? BS::weight_gen(*data.all) : 0;
+	if (is_learn && count > 0 && !test_sequence)
+	  multiline_learn_or_predict<true>(base, examples, data.offset, i);
+	else
+	  multiline_learn_or_predict<false>(base, examples, data.offset, i);
+	assert(preds.size() == num_actions);
+	data.action_probs[preds[0].action].score += prob;
+	if (is_learn && !test_sequence)
+	  for (uint32_t j = 1; j < count; j++)
+	    multiline_learn_or_predict<true>(base, examples, data.offset, i);
+      }
+    
+    CB_EXPLORE::safety(data.action_probs, data.epsilon, true);
+    qsort((void*) data.action_probs.begin(), data.action_probs.size(), sizeof(action_score), reverse_order);
+    
+    for (size_t i = 0; i < num_actions; i++)
+      preds[i] = data.action_probs[i];
+  }
+  
 template <bool is_learn>
 void predict_or_learn_cover(cb_explore_adf& data, base_learner& base, v_array<example*>& examples)
 { //Randomize over predictions from a base set of predictors
@@ -240,11 +247,14 @@ void predict_or_learn_softmax(cb_explore_adf& data, base_learner& base, v_array<
   uint32_t num_actions = (uint32_t)preds.size();
   float norm = 0.;
   float max_score = preds[0].score;
+  for (size_t i = 1; i < num_actions; i++)
+    if (max_score < preds[i].score)
+      max_score = preds[i].score;
 
   for (size_t i = 0; i < num_actions; i++)
   { float prob = exp(data.lambda*(preds[i].score - max_score));
     preds[i].score = prob;
-    norm += prob;
+     norm += prob;
   }
   for (size_t i = 0; i < num_actions; i++)
     preds[i].score /= norm;
@@ -534,13 +544,13 @@ base_learner* cb_explore_adf_setup(vw& all)
       data.gen_cs.cb_type = CB_TYPE_IPS;
     else if (type_string.compare("mtr") == 0)
       if (vm.count("cover"))
-      { cout << "warning: cover and mtr are not simultaneously supported yet, defaulting to ips" << endl;
+      { all.trace_message << "warning: cover and mtr are not simultaneously supported yet, defaulting to ips" << endl;
         data.gen_cs.cb_type = CB_TYPE_IPS;
       }
       else
         data.gen_cs.cb_type = CB_TYPE_MTR;
     else
-      std::cerr << "warning: cb_type must be in {'ips','dr'}; resetting to ips." << std::endl;
+      all.trace_message << "warning: cb_type must be in {'ips','dr'}; resetting to ips." << std::endl;
   }
 
   l.set_finish_example(CB_EXPLORE_ADF::finish_multiline_example);

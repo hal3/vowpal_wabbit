@@ -6,14 +6,24 @@
 // </copyright>
 // --------------------------------------------------------------------------------------------------------------------
 
-using VowpalWabbit.Azure.Trainer.Checkpoint;
+using System;
+using VW.Azure.Trainer.Checkpoint;
 
-namespace VowpalWabbit.Azure.Trainer
+namespace VW.Azure.Trainer
 {
+    /// <summary>
+    /// The internal trainer settings.
+    /// </summary>
     public class OnlineTrainerSettingsInternal
     {
+        /// <summary>
+        /// The Azure storage container name used for model and state history.
+        /// </summary>
         public string StorageContainerName { get; private set; } = "onlinetrainer";
 
+        /// <summary>
+        /// External supplied meta data.
+        /// </summary>
         public OnlineTrainerSettings Metadata { get; set;  }
 
         /// <summary>
@@ -21,10 +31,19 @@ namespace VowpalWabbit.Azure.Trainer
         /// </summary>
         public string InitialVowpalWabbitModel { get; set; }
 
+        /// <summary>
+        /// Azure storage connection string used for checkpointing.
+        /// </summary>
         public string StorageConnectionString { get; set; }
 
+        /// <summary>
+        /// Input data Azure EventHub connection string.
+        /// </summary>
         public string JoinedEventHubConnectionString { get; set; }
 
+        /// <summary>
+        /// Evaluation output Azure Eventhub connection string.
+        /// </summary>
         public string EvalEventHubConnectionString { get; set; }
 
         /// <summary>
@@ -32,8 +51,20 @@ namespace VowpalWabbit.Azure.Trainer
         /// </summary>
         public ICheckpointPolicy CheckpointPolicy { get; set; }
 
+        /// <summary>
+        /// True if examples should be traced.
+        /// </summary>
         public bool EnableExampleTracing { get; set; }
 
+        /// <summary>
+        /// Null will let the trainer read events earliest available timestamps in event hub input;
+        /// Any other valid DateTime will let the trainer read events from that point in time.
+        /// </summary>
+        public DateTime? EventHubStartDateTimeUtc { get; set; }
+
+        /// <summary>
+        /// True if a fresh start was forced.
+        /// </summary>
         internal bool ForceFreshStart { get; set; }
     }
 }

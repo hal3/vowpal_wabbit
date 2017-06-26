@@ -8,12 +8,15 @@ using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Threading.Tasks.Dataflow;
-using VowpalWabbit.Azure.Trainer.Data;
-using VowpalWabbit.Azure.Trainer.Operations;
+using VW.Azure.Trainer.Data;
+using VW.Azure.Trainer.Operations;
 using VW.Serializer;
 
-namespace VowpalWabbit.Azure.Trainer
+namespace VW.Azure.Trainer
 {
+    /// <summary>
+    /// Azure online trainer.
+    /// </summary>
     public sealed class LearnEventProcessorHost : IDisposable
     {
         private readonly TelemetryClient telemetry;
@@ -26,6 +29,9 @@ namespace VowpalWabbit.Azure.Trainer
         private SafeTimer perfUpdater;
         private DateTime? eventHubStartDateTimeUtc;
 
+        /// <summary>
+        /// Initializes a new <see cref="LearnEventProcessorHost"/> instance.
+        /// </summary>
         public LearnEventProcessorHost()
         {
             this.telemetry = new TelemetryClient();
@@ -34,8 +40,14 @@ namespace VowpalWabbit.Azure.Trainer
             this.eventHubStartDateTimeUtc = null;
         }
 
+        /// <summary>
+        /// Performance countners populated by online trainer.
+        /// </summary>
         public PerformanceCounters PerformanceCounters { get { return this.perfCounters; } }
 
+        /// <summary>
+        /// Timestamp when the trainer was last started.
+        /// </summary>
         public DateTime LastStartDateTimeUtc { get; private set; }
 
         internal object InitialOffsetProvider(string partition)
@@ -48,26 +60,42 @@ namespace VowpalWabbit.Azure.Trainer
             return this.eventHubStartDateTimeUtc;
         }
 
+        /// <summary>
+        /// Starts the trainer with given parameters.
+        /// </summary>
         public async Task StartAsync(OnlineTrainerSettingsInternal settings)
         {
             await this.SafeExecute(async () => await this.StartInternalAsync(settings));
         }
 
+        /// <summary>
+        /// Stops the trainer.
+        /// </summary>
+        /// <returns></returns>
         public async Task StopAsync()
         {
             await this.SafeExecute(this.StopInternalAsync);
         }
 
+        /// <summary>
+        /// Restarts the trainer.
+        /// </summary>
         public async Task Restart(OnlineTrainerSettingsInternal settings)
         {
             await this.SafeExecute(async () => await this.RestartInternalAsync(settings));
         }
 
+        /// <summary>
+        /// Resets the trainers.
+        /// </summary>
         public async Task ResetModelAsync(OnlineTrainerState state = null, byte[] model = null)
         {
             await this.SafeExecute(async () => await this.ResetInternalAsync(state, model));
         }
 
+        /// <summary>
+        /// Forces model checkpointing.
+        /// </summary>
         public async Task CheckpointAsync()
         {
             await this.SafeExecute(async () => await this.trainProcessorFactory.LearnBlock.SendAsync(new CheckpointTriggerEvent()));
@@ -87,6 +115,7 @@ namespace VowpalWabbit.Azure.Trainer
             {
                 foreach (var innerEx in ex.Flatten().InnerExceptions)
                     this.telemetry.TrackException(innerEx);
+                throw ex;
             }
             catch (Exception ex)
             {
@@ -147,9 +176,6 @@ namespace VowpalWabbit.Azure.Trainer
 
             await this.StopInternalAsync();
 
-            // make sure we ignore previous events
-            this.eventHubStartDateTimeUtc = DateTime.UtcNow;
-
             await this.StartInternalAsync(settings);
         }
 
@@ -177,6 +203,9 @@ namespace VowpalWabbit.Azure.Trainer
             this.eventProcessorHost = new EventProcessorHost(settings.Metadata.ApplicationID, joinedEventhubName,
                 EventHubConsumerGroup.DefaultGroupName, serviceBusConnectionStringBuilder.ToString(), settings.StorageConnectionString);
 
+            // used by this.InitialOffsetProvider if no checkpointed state is found
+            this.eventHubStartDateTimeUtc = settings.EventHubStartDateTimeUtc;
+
             await this.eventProcessorHost.RegisterEventProcessorFactoryAsync(
                 this.trainProcessorFactory,
                 new EventProcessorOptions { InitialOffsetProvider = this.InitialOffsetProvider });
@@ -186,14 +215,18 @@ namespace VowpalWabbit.Azure.Trainer
                 TimeSpan.FromMilliseconds(500),
                 this.UpdatePerformanceCounters);
 
+            var vwArgs = this.trainer.VowpalWabbit.Arguments;
+
             this.telemetry.TrackTrace(
                 "OnlineTrainer started",
                 SeverityLevel.Information,
                 new Dictionary<string, string>
                 {
-                { "CheckpointPolicy", settings.CheckpointPolicy.ToString() },
-                { "VowpalWabbit", settings.Metadata.TrainArguments },
-                { "ExampleTracing", settings.EnableExampleTracing.ToString() }
+                    { "CheckpointPolicy", settings.CheckpointPolicy.ToString() },
+                    { "VowpalWabbit", settings.Metadata.TrainArguments },
+                    { "ExampleTracing", settings.EnableExampleTracing.ToString() },
+                    { "LearningRate", vwArgs.LearningRate.ToString() },
+                    { "PowerT", vwArgs.PowerT.ToString() }
                 });
         }
 
@@ -204,8 +237,11 @@ namespace VowpalWabbit.Azure.Trainer
                 // make sure this is thread safe w.r.t reset/start/stop/...
                 try
                 {
-                    this.trainer.UpdatePerformanceCounters();
-                    this.trainProcessorFactory.UpdatePerformanceCounters();
+                    if (this.trainer != null && this.trainProcessorFactory != null)
+                    {
+                        this.trainer.UpdatePerformanceCounters();
+                        this.trainProcessorFactory.UpdatePerformanceCounters();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -295,6 +331,9 @@ namespace VowpalWabbit.Azure.Trainer
             }
         }
 
+        /// <summary>
+        /// Dispose the trainer.
+        /// </summary>
         public void Dispose()
         {
             try

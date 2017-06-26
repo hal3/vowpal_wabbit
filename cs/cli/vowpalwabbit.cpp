@@ -15,6 +15,7 @@ license as described in the file LICENSE.
 #include "clr_io.h"
 #include "lda_core.h"
 #include "parse_example.h"
+#include "parse_example_json.h"
 
 using namespace System;
 using namespace System::Collections::Generic;
@@ -201,6 +202,7 @@ void VowpalWabbit::Predict(VowpalWabbitExample^ ex)
   if (ex == nullptr)
     throw gcnew ArgumentNullException("ex");
 #endif
+
   try
   { m_vw->l->predict(*ex->m_example);
 
@@ -244,57 +246,59 @@ example& get_example_from_pool(void* v)
   return *ex->m_example;
 }
 
-List<VowpalWabbitExample^>^ VowpalWabbit::ParseJson(String^ line)
-{
+  List<VowpalWabbitExample^>^ VowpalWabbit::ParseJson(String^ line)
+  {
 #if _DEBUG
-  if (line == nullptr)
-    throw gcnew ArgumentNullException("line");
+	  if (line == nullptr)
+		  throw gcnew ArgumentNullException("line");
 #endif
-  auto bytes = System::Text::Encoding::UTF8->GetBytes(line);
-  auto valueHandle = GCHandle::Alloc(bytes, GCHandleType::Pinned);
+	  auto bytes = System::Text::Encoding::UTF8->GetBytes(line);
+	  auto valueHandle = GCHandle::Alloc(bytes, GCHandleType::Pinned);
 
-  try
-  { ParseJsonState^ state = gcnew ParseJsonState();
-    state->vw = this;
-    state->examples = gcnew List<VowpalWabbitExample^>();
+	  try
+	  {
+		  ParseJsonState^ state = gcnew ParseJsonState();
+		  state->vw = this;
+		  state->examples = gcnew List<VowpalWabbitExample^>();
 
-    try
-    { auto ex = GetOrCreateNativeExample();
-      state->examples->Add(ex);
+		  try
+		  {
+			  auto ex = GetOrCreateNativeExample();
+			  state->examples->Add(ex);
 
-      v_array<example*> examples = v_init<example*>();
-      example* native_example = ex->m_example;
-      examples.push_back(native_example);
+			  v_array<example*> examples = v_init<example*>();
+			  example* native_example = ex->m_example;
+			  examples.push_back(native_example);
 
-      interior_ptr<ParseJsonState^> state_ptr = &state;
+			  interior_ptr<ParseJsonState^> state_ptr = &state;
+			  
+			  if (m_vw->audit)
+				VW::read_line_json<true>(*m_vw, examples, reinterpret_cast<char*>(valueHandle.AddrOfPinnedObject().ToPointer()), get_example_from_pool, &state);
+			  else
+				VW::read_line_json<false>(*m_vw, examples, reinterpret_cast<char*>(valueHandle.AddrOfPinnedObject().ToPointer()), get_example_from_pool, &state);
 
-      VW::read_line_json(
-        *m_vw,
-        examples,
-        reinterpret_cast<char*>(valueHandle.AddrOfPinnedObject().ToPointer()),
-        get_example_from_pool,
-        &state);
+			  // finalize example
+			  VW::setup_examples(*m_vw, examples);
 
-      // finalize example
-      VW::setup_examples(*m_vw, examples);
+			  // remember the input string for debugging purposes
+			  ex->VowpalWabbitString = line;
 
-      // remember the input string for debugging purposes
-      ex->VowpalWabbitString = line;
-
-      return state->examples;
-    }
-    catch (...)
-    { // cleanup
-      for each (auto ex in state->examples)
-        delete ex;
-      throw;
-    }
+			  return state->examples;
+		  }
+		  catch (...)
+		  {
+			  // cleanup
+			  for each (auto ex in state->examples)
+				  delete ex;
+			  throw;
+		  }
+	  }
+	  CATCHRETHROW
+		  finally
+	  {
+		  valueHandle.Free();
+	  }
   }
-  CATCHRETHROW
-  finally
-  { valueHandle.Free();
-  }
-}
 
 VowpalWabbitExample^ VowpalWabbit::ParseLine(String^ line)
 {
@@ -727,33 +731,40 @@ cli::array<List<VowpalWabbitFeature^>^>^ VowpalWabbit::GetTopicAllocation(int to
     for (auto& pair : top_weights)
       clr_weights->Add(gcnew VowpalWabbitFeature(this, pair.x, pair.weight_index));
   }
-
   return allocation;
 }
 
+template<typename T>
+cli::array<cli::array<float>^>^ VowpalWabbit::FillTopicAllocation(T& weights)
+{
+	uint64_t length = (uint64_t)1 << m_vw->num_bits;
 
+	// using jagged array to enable LINQ
+	auto K = (int)m_vw->lda;
+	auto allocation = gcnew cli::array<cli::array<float>^>(K);
+	for (int k = 0; k < K; k++)
+		allocation[k] = gcnew cli::array<float>((int)length);
+
+	// TODO: better way of peaking into lda?
+	auto lda_rho = m_vw->vm["lda_rho"].as<float>();
+
+	for (auto iter = weights.begin(); iter != weights.end(); ++iter)
+	{   // over topics
+		auto v = iter.begin();
+		for (uint64_t k = 0; k < K; k++, ++v)
+			allocation[(int)k][(int)iter.index()] = *v + lda_rho;
+	}
+
+	return allocation;
+}
+  
 cli::array<cli::array<float>^>^  VowpalWabbit::GetTopicAllocation()
-{ uint64_t length = (uint64_t)1 << m_vw->num_bits;
-
-  // using jagged array to enable LINQ
-  auto K = (int)m_vw->lda;
-  auto allocation = gcnew cli::array<cli::array<float>^>(K);
-  for (int k = 0; k < K; k++)
-    allocation[k] = gcnew cli::array<float>((int)length);
-
-  // TODO: better way of peaking into lda?
-  auto lda_rho = m_vw->vm["lda_rho"].as<float>();
-
-  // over weights
-  weight_parameters& weights = m_vw->weights;
-  weight_parameters::iterator iter = weights.begin();
-  for (uint64_t i = 0; i < length; i++, ++iter)
-  { // over topics
-    weight_parameters::iterator::w_iter v = iter.begin();
-    for (uint64_t k = 0; k < K; k++, ++v)
-      allocation[(int)k][(int)i] = *v + lda_rho;
+{
+	// over weights
+	if (m_vw->weights.sparse)
+		return FillTopicAllocation(m_vw->weights.sparse_weights);
+	else
+		return FillTopicAllocation(m_vw->weights.dense_weights);
   }
+}
 
-  return allocation;
-}
-}

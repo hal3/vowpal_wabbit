@@ -1,3 +1,4 @@
+
 /*
 Copyright (c) by respective owners including Yahoo!, Microsoft, and
 individual contributors. All rights reserved.  Released under a BSD
@@ -231,6 +232,10 @@ struct shared_data
   bool report_multiclass_log_loss;
   double multiclass_log_loss;
   double holdout_multiclass_log_loss;
+  
+  bool  is_more_than_two_labels_observed;
+  float first_observed_label;
+  float second_observed_label;
 
   // Column width, precision constants:
   static const int col_avg_loss = 8;
@@ -403,6 +408,30 @@ namespace label_type
 };
 }
 
+typedef void(*trace_message_t)(void *context, const std::string&);
+
+// TODO: change to virtual class
+
+// invoke trace_listener when << endl is encountered.
+class vw_ostream : public std::ostream
+{
+	class vw_streambuf : public std::stringbuf
+	{
+		vw_ostream& parent;
+	public:
+		vw_streambuf(vw_ostream& str);
+
+		virtual int sync();
+	};
+	vw_streambuf buf;
+
+public:
+	vw_ostream();
+
+	void* trace_context;
+	trace_message_t trace_listener;
+};
+
 struct vw
 { shared_data* sd;
 
@@ -423,7 +452,7 @@ struct vw
 
   void (*set_minmax)(shared_data* sd, float label);
 
-  size_t current_pass;
+  uint64_t current_pass;
 
   uint32_t num_bits; // log_2 of the number of features.
   bool default_bits;
@@ -441,6 +470,7 @@ struct vw
   bool hessian_on;
 
   bool save_resume;
+  bool preserve_performance_counters;
   std::string id;
 
   version_struct model_file_ver;
@@ -465,6 +495,7 @@ struct vw
 
   float l1_lambda; //the level of l_1 regularization to impose.
   float l2_lambda; //the level of l_2 regularization to impose.
+  bool no_bias;    //no bias in regularization
   float power_t;//the power on learning rate decay.
   int reg_mode;
 
@@ -478,6 +509,8 @@ struct vw
   std::vector<std::string> triples; // triples of features to cross.
   bool ignore_some;
   bool ignore[256];//a set of namespaces to ignore
+  bool ignore_some_linear;
+  bool ignore_linear[256];//a set of namespaces to ignore for linear
 
   bool redefine_some;          // --redefine param was used
   unsigned char redefine[256]; // keeps new chars for amespaces
@@ -501,7 +534,8 @@ struct vw
   bool adaptive;//Should I use adaptive individual learning rates?
   bool normalized_updates; //Should every feature be normalized
   bool invariant_updates; //Should we use importance aware/safe updates
-  size_t random_seed;
+  uint64_t random_seed;
+  uint64_t random_state; // per instance random_state
   bool random_weights;
   bool random_positive_weights; // for initialize_regressor w/ new_mf
   bool add_constant;
@@ -544,8 +578,8 @@ struct vw
 
   std::string final_regressor_name;
 
-  weight_parameters weights;
-
+  parameters weights;
+  
   size_t max_examples; // for TLC
 
   bool hash_inv;
@@ -559,7 +593,12 @@ struct vw
 
   label_type::label_type_t label_type;
 
+  vw_ostream trace_message;
+
   vw();
+
+  // ostream doesn't have copy constructor and the python library used some boost code which code potentially invoke this
+  vw(const vw &);
 };
 
 void print_result(int f, float res, float weight, v_array<char> tag);

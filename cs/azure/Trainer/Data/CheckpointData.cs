@@ -8,13 +8,15 @@
 
 using System;
 
-namespace VowpalWabbit.Azure.Trainer.Data
+namespace VW.Azure.Trainer.Data
 {
     internal sealed class CheckpointData
     {
         internal byte[] Model { get; set; }
 
         internal byte[] EvalModel { get; set; }
+
+        internal int TrackbackCount { get; set; }
 
         internal string TrackbackList { get; set; }
 

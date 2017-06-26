@@ -11,6 +11,7 @@ else
 endif
 #ARCH = $(shell test `$CXX -v 2>&1 | tail -1 | cut -d ' ' -f 3 | cut -d '.' -f 1,2` \< 4.3 && echo -march=nocona || echo -march=native)
 
+
 ifeq ($(CXX),)
   $(warning No compiler found)
   exit 1
@@ -117,16 +118,14 @@ library_example_gcov: vw_gcov
 python: vw
 	cd python; $(MAKE) things
 
-ifneq ($(JAVA_HOME),)
 java: vw
 	cd java; $(MAKE) things
-endif
 
 .FORCE:
 
 test: .FORCE vw library_example
 	@echo "vw running test-suite..."
-	(cd test && ./RunTests -d -fe -E 0.001 ../vowpalwabbit/vw ../vowpalwabbit/vw)
+	(cd test && ./RunTests -d -fe -E 0.001 ../vowpalwabbit/vw)
 
 test_gcov: .FORCE vw_gcov library_example_gcov
 	@echo "vw running test-suite..."
@@ -136,7 +135,7 @@ bigtests:	.FORCE vw
 	(cd big_tests && $(MAKE) $(MAKEFLAGS))
 
 install: $(BINARIES)
-	cd vowpalwabbit; cp $(BINARIES) /usr/local/bin; cd ../cluster; $(MAKE) install
+	cd vowpalwabbit; cp $(BINARIES) /usr/local/bin; cd ../cluster; $(MAKE) install; cd ../java; $(MAKE) install;
 
 doc:
 	(cd doc && doxygen Doxyfile)
@@ -146,8 +145,6 @@ clean:
 	cd cluster && $(MAKE) clean
 	cd library && $(MAKE) clean
 	cd python  && $(MAKE) clean
-ifneq ($(JAVA_HOME),)
 	cd java    && $(MAKE) clean
-endif
 
 .PHONY: all clean install doc

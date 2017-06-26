@@ -20,7 +20,7 @@ using System.Threading.Tasks;
 using VW;
 using VW.Serializer;
 
-namespace VowpalWabbit.Azure.Trainer
+namespace VW.Azure.Trainer
 {
     internal partial class Learner
     {
@@ -75,9 +75,11 @@ namespace VowpalWabbit.Azure.Trainer
             // start from scratch
             this.state = state;
 
-            var settings = model == null ?
-                new VowpalWabbitSettings(this.settings.Metadata.TrainArguments) :
-                new VowpalWabbitSettings(string.Empty) { ModelStream = new MemoryStream(model) };
+            // save extra state so learning can be resumed later with new data
+            var settings = new VowpalWabbitSettings("--save_resume --preserve_performance_counters " + this.settings.Metadata.TrainArguments);
+
+            if (model != null)
+                settings.ModelStream = new MemoryStream(model);
 
             this.InitializeVowpalWabbit(settings);
         }
@@ -106,66 +108,28 @@ namespace VowpalWabbit.Azure.Trainer
             }
 
             // load the model
-            using (var modelStream = await modelBlob.OpenReadAsync())
+            var args = "--save_resume --preserve_performance_counters " + this.settings.Metadata.TrainArguments;
+            try
             {
-                this.InitializeVowpalWabbit(new VowpalWabbitSettings { ModelStream = modelStream });
-                this.telemetry.TrackTrace($"Model loaded {this.state.ModelName}", SeverityLevel.Verbose);
-
-                // validate that the loaded VW model has the same settings as requested by C&C
-                var newSettings = new VowpalWabbitSettings(this.settings.Metadata.TrainArguments);
-                using (var newVW = new VW.VowpalWabbit(newSettings))
+                using (var modelStream = await modelBlob.OpenReadAsync())
                 {
-                    newVW.ID = this.vw.ID;
-
-                    // save the VW instance to a model and load again to get fully expanded parameters.
-                    string newVWarguments;
-                    using (var tempModel = new MemoryStream())
-                    {
-                        newVW.SaveModel(tempModel);
-                        tempModel.Position = 0;
-
-                        using (var tempVW = new VW.VowpalWabbit(new VowpalWabbitSettings { ModelStream = tempModel }))
-                        {
-                            newVWarguments = CleanVowpalWabbitArguments(tempVW.Arguments.CommandLine);
-                        }
-                    }
-
-                    var oldVWarguments = CleanVowpalWabbitArguments(this.vw.Arguments.CommandLine);
-
-                    // this is the expanded command line
-                    if (newVWarguments != oldVWarguments)
-                    {
-                        this.telemetry.TrackTrace("New VowpalWabbit settings found. Discarding existing model",
-                            SeverityLevel.Information,
-                            new Dictionary<string, string>
-                            {
-                            { "TrainArguments", newVW.Arguments.CommandLine },
-                            { "NewExpandedArguments", newVWarguments },
-                            { "OldExpandedArgumentsCleaned", oldVWarguments },
-                            { "OldExpandedArguments", this.vw.Arguments.CommandLine },
-                            });
-
-                        // discard old, use fresh
-                        this.vw.Dispose();
-                        this.vw = null;
-
-                        this.InitializeVowpalWabbit(newSettings);
-                    }
+                    // it's up to the external system to make sure the train arguments are compatible with the stored model
+                    // if the arguments are changed substantially, one needs to invoke Reset which forces a refresh
+                    this.InitializeVowpalWabbit(new VowpalWabbitSettings(args) { ModelStream = modelStream });
+                    this.telemetry.TrackTrace($"Model loaded {this.state.ModelName}", SeverityLevel.Verbose);
                 }
+            }
+            catch (VowpalWabbitArgumentDisagreementException ex)
+            {
+                // found conflicting arguments. Start fresh model
+                this.InitializeVowpalWabbit(new VowpalWabbitSettings(args));
+                this.telemetry.TrackTrace($"Arguments found in model {this.state.ModelName} disagree with newly supplied arguments: {args}. Discarding model and starting fresh: {ex.Message}", SeverityLevel.Verbose);
             }
 
             // store the initial model
             this.settings.InitialVowpalWabbitModel = this.state.ModelName;
 
             return true;
-        }
-
-        // --max_prediction 111.670006 
-        private static readonly Regex RegexMaxPrediction = new Regex("--max_prediction\\s+\\S+(\\s?|$)", RegexOptions.Compiled);
-
-        private static string CleanVowpalWabbitArguments(string args)
-        {
-            return RegexMaxPrediction.Replace(args, " ");
         }
         
         private void InitializeVowpalWabbit(VowpalWabbitSettings vwSettings)
