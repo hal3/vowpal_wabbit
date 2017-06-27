@@ -184,7 +184,7 @@ namespace VW_CNTK {
 			std::copy(dat.d->input_filename.begin(), dat.d->input_filename.end(), std::back_inserter(wfilename));
 
 			// load model
-			auto model = Function::LoadModel(wfilename, dat.d->device);
+			auto model = Function::Load(wfilename, dat.d->device);
 
 			// get inputs
 			auto inputs = model->Inputs();
@@ -244,7 +244,7 @@ namespace VW_CNTK {
 			std::copy(dat.d->output_filename.begin(), dat.d->output_filename.end(), std::back_inserter(wfilename));
 
 			// load model
-			dat.d->trainer->Model()->SaveModel(wfilename);
+			dat.d->trainer->Model()->Save(wfilename);
 		}
 	}
 

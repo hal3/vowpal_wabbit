@@ -2,7 +2,7 @@ BINARIES = vw active_interactor
 MANPAGES = vw.1
 
 VWLIBS := -L. -l vw -l allreduce
-STDLIBS = $(BOOST_LIBRARY) $(LIBS)
+STDLIBS = $(BOOST_LIBRARY) $(LIBS) $(CNTK_LIBRARY)
 
 all:
 	cd ..; $(MAKE)
