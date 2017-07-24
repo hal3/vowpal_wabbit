@@ -40,7 +40,7 @@ struct data
 
   
   float get_adanormalhedge_weights(float R, float C) {
-    float Rpos = R > 0 ? R : 0.;
+    float Rpos = R > 0 ? R : 0.f;
     if(C == 0. || Rpos == 0.) return 0;
     return 2*Rpos*correctedExp(Rpos*Rpos / (3*C))/(3*C);
   }
@@ -124,15 +124,15 @@ struct data
       sm.net_feature_weight = 1.;
       sm.average_pred = sm.feature_pred;
     }
-    float inv_weight = 1.0/(sm.net_weight + sm.net_feature_weight);
+    float inv_weight = 1.0f/(sm.net_weight + sm.net_feature_weight);
     sm.average_pred *= inv_weight;
     ec.pred.scalar = sm.average_pred;
     ec.partial_prediction = sm.average_pred;
+
     if(is_learn) {
       sm.alg_loss += sm.net_feature_weight*all.loss->getLoss(all.sd, sm.feature_pred, label);
       sm.alg_loss *= inv_weight;
     }
-    
   }
   
   void update_marginal(data& sm, example& ec)
@@ -157,7 +157,7 @@ struct data
 
 	      if(sm.compete) { //now update weights, before updating marginals
 		expert_pair& e = sm.expert_state[key];
-		float regret1 = sm.alg_loss - all.loss->getLoss(all.sd, m.first/m.second, label);
+		float regret1 = sm.alg_loss - all.loss->getLoss(all.sd, (float) (m.first/m.second), label);
 		float regret2 = sm.alg_loss - all.loss->getLoss(all.sd, sm.feature_pred, label);
 		
 		e.first.regret += regret1*weight;
@@ -221,8 +221,9 @@ void predict_or_learn(data& sm, LEARNER::base_learner& base, example& ec)
   
 void finish(data& sm)
 { sm.marginals.~unordered_map();
-  sm.expert_state.~unordered_map();
-  for (size_t i =0; i < 256; i++)
+  if (sm.compete) 
+    sm.expert_state.~unordered_map();
+ for (size_t i =0; i < 256; i++)
     sm.temp[i].delete_v();
 }
   
@@ -266,6 +267,7 @@ void finish(data& sm)
 	  ++iter;
       }
 
+	if (sm.compete) {
     if (!read)
       { total_size = (uint64_t)sm.expert_state.size();
 	msg << "expert_state size = " << total_size << "\n";
@@ -315,6 +317,7 @@ void finish(data& sm)
 	else
 	  ++exp_iter;
       }
+	}
   }
 }
 
@@ -332,7 +335,7 @@ LEARNER::base_learner* marginal_setup(vw& all)
     ("decay", po::value<float>()->default_value(0.f), "decay multiplier per event (1e-3 for example)");
   add_options(all);
   
-  data& d = calloc_or_throw<data>();
+  MARGINAL::data& d = calloc_or_throw<MARGINAL::data>();
   d.initial_numerator = all.vm["initial_numerator"].as<float>();
   d.initial_denominator = all.vm["initial_denominator"].as<float>();
   d.decay = all.vm["decay"].as<float>();
@@ -350,7 +353,7 @@ LEARNER::base_learner* marginal_setup(vw& all)
   new(&d.marginals)unordered_map<uint64_t,marginal>();
   new(&d.expert_state)unordered_map<uint64_t,expert_pair>();
 
-  LEARNER::learner<data>& ret =
+  LEARNER::learner<MARGINAL::data>& ret =
     init_learner(&d, setup_base(all), predict_or_learn<true>, predict_or_learn<false>);
   ret.set_finish(finish);
   ret.set_save_load(save_load);

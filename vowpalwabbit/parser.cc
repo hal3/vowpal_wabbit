@@ -290,7 +290,13 @@ void finalize_source(parser* p)
   p->output->close_files();
   delete p->output;
   if (p->jsonp)
-    delete p->jsonp;
+    {
+      if (p->audit)
+	delete (json_parser<true>*)p->jsonp;
+      else 
+	delete (json_parser<false>*)p->jsonp;
+      p->jsonp = nullptr;
+    }
 }
 
 void make_write_cache(vw& all, string &newname, bool quiet)
@@ -574,19 +580,23 @@ child:
         }
       }
 
-      if (all.vm.count("json"))
+      if (all.vm.count("json") || all.vm.count("dsjson"))
       { 
 		  // TODO: change to class with virtual method
 		  if (all.audit)
 		  {
 			  all.p->reader = &read_features_json<true>;
+			  all.p->audit = true;
 			  all.p->jsonp = new json_parser<true>;
 		  }
 		  else
 		  {
 			  all.p->reader = &read_features_json<false>;
+			  all.p->audit = false;
 			  all.p->jsonp = new json_parser<false>;
 		  }
+
+		  all.p->decision_service_json = all.vm.count("dsjson") > 0;
       }
       else
         all.p->reader = read_features_string;
