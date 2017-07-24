@@ -547,11 +547,12 @@ void add_new_feature(search_private& priv, float val, uint64_t idx)
 void del_features_in_top_namespace(search_private& priv, example& ec, size_t ns)
 {
   if ((ec.indices.size() == 0) || (ec.indices.last() != ns))
-  { if (ec.indices.size() == 0)
-    { assert(false); THROW("internal error (bug): expecting top namespace to be '" << ns << "' but it was empty"); }
-    else
-    { assert(false); THROW("internal error (bug): expecting top namespace to be '" << ns << "' but it was " << (size_t)ec.indices.last()); }
-  }
+    { return;
+      //if (ec.indices.size() == 0)
+      //{ assert(false); THROW("internal error (bug): expecting top namespace to be '" << ns << "' but it was empty"); }
+      //else
+      //{ assert(false); THROW("internal error (bug): expecting top namespace to be '" << ns << "' but it was " << (size_t)ec.indices.last()); }
+    }
   features& fs = ec.feature_space[ns];
   ec.indices.decr();
   ec.num_features -= fs.size();
