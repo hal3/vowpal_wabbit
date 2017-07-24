@@ -2564,13 +2564,6 @@ base_learner* setup(vw&all)
   for (size_t i=0; i<all.args.size()-1; i++)
     if (all.args[i] == "--search_task" && all.args[i+1] == "hook")
       has_hook_task = true;
-  if (has_hook_task)
-  { for (int i = (int)all.args.size()-2; i >= 0; i--)
-      if (all.args[i] == "--search_task" && all.args[i+1] != "hook")
-        all.args.erase(all.args.begin() + i, all.args.begin() + i + 2);
-    vm.erase(vm.find("search_task"));
-    //modify_variable_map<string>(vm, "search_task", "hook");
-  }
 
   search& sch = calloc_or_throw<search>();
   sch.priv = &calloc_or_throw<search_private>();
@@ -2799,7 +2792,13 @@ base_learner* setup(vw&all)
 
   if (vm.count("search_override_hook") > 0)
   { cerr << "overriding task " << task_string << " with hook!" << endl;
-    // TODO remove
+    if (has_hook_task)
+      { for (int i = (int)all.args.size()-2; i >= 0; i--)
+	  if (all.args[i] == "--search_task" && all.args[i+1] != "hook")
+	    all.args.erase(all.args.begin() + i, all.args.begin() + i + 2);
+	vm.erase(vm.find("search_task"));
+	//modify_variable_map<string>(vm, "search_task", "hook");
+      }
   }
   
   if (((!priv.is_ldf) || priv.global_is_mixed_ldf) && (! args_has_non_ldf))
@@ -3341,6 +3340,7 @@ action predictor::predict()
   const action* alA      = (allowed_actions.size() == 0) ? nullptr : allowed_actions.begin();
   const float*  alAcosts = (allowed_actions_cost.size() == 0) ? nullptr : allowed_actions_cost.begin();
   size_t numAlA = max(allowed_actions.size(), allowed_actions_cost.size());
+
   if (this->sch.priv->global_is_mixed_ldf)
     for (size_t i = 0; i < ec_cnt; i++)
       ec[i].skip_reduction_layer = skip_reduction_layer;
