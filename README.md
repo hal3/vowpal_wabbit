@@ -11,8 +11,9 @@ license as described in the file LICENSE.
 [![Build Status](https://travis-ci.org/JohnLangford/vowpal_wabbit.png)](https://travis-ci.org/JohnLangford/vowpal_wabbit)
 [![Windows Build Status](https://ci.appveyor.com/api/projects/status/github/JohnLangford/vowpal_wabbit?branch=master&svg=true)](https://ci.appveyor.com/project/JohnLangford/vowpal-wabbit)
 [![Coverage Status](https://coveralls.io/repos/JohnLangford/vowpal_wabbit/badge.svg)](https://coveralls.io/r/JohnLangford/vowpal_wabbit)
+[![Total Alerts](https://img.shields.io/lgtm/alerts/g/JohnLangford/vowpal_wabbit.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/JohnLangford/vowpal_wabbit/alerts/)
 
-This is the *vowpal wabbit* fast online learning code.  For Windows, look at README.windows.txt
+This is the *vowpal wabbit* fast online learning code.  For Windows, look at [README.windows.txt](./README.windows.txt)
 
 ## Prerequisite software
 
@@ -34,6 +35,9 @@ The very latest version is always available via 'github' by invoking one of the 
 ```
 ## For the traditional ssh-based Git interaction:
 $ git clone git://github.com/JohnLangford/vowpal_wabbit.git
+
+## You can also try the following SSH URL:
+$ git clone git@github.com:JohnLangford/vowpal_wabbit.git
 
 ## For HTTP-based Git interaction
 $ git clone https://github.com/JohnLangford/vowpal_wabbit.git
@@ -129,12 +133,34 @@ versions (e.g. even from Ubuntu to Red-Hat) can be built and tested with:
 make CXX='clang++ -static' clean vw test     # ignore warnings
 ```
 
+## Debian Python 3 Binding
+
+Ensure boost-library and c-compiler are installed:
+```
+apt-get install libboost-program-options-dev zlib1g-dev libboost-python-dev clang make automake
+```
+
+Set Python 3.x and its boost-library as default:
+```
+update-alternatives --install /usr/bin/python python /usr/bin/python2.7 1
+update-alternatives --install /usr/bin/python python /usr/bin/python3.x 2
+
+ln -sf /usr/lib/x86_64-linux-gnu/libboost_python-py3x.a /usr/lib/x86_64-linux-gnu/libboost_python.a
+ln -sf /usr/lib/x86_64-linux-gnu/libboost_python-py3x.so /usr/lib/x86_64-linux-gnu/libboost_python.so
+```
+
+Install Vowpal Wabbit via pip:
+```
+pip3 install vowpalwabbit
+```
+
+
 ## Mac OS X-specific info
 
 OSX requires _glibtools_, which is available via the [brew](http://brew.sh) or
 [MacPorts](https://www.macports.org) package managers.
 
-### Complete brew install of 8.0
+### Complete brew install of 8.4
 ```
 brew install vowpal-wabbit
 ```
@@ -156,10 +182,10 @@ brew install boost-python
 $ port install libtool autoconf automake
 
 ## Build Boost for Mac OS X 10.8 and below
-$ port install boost +no_single +no_static +openmpi +python27 configure.cxx_stdlib=libc++ configure.cxx=clang++
+$ port install boost +no_single -no_static +openmpi +python27 configure.cxx_stdlib=libc++ configure.cxx=clang++
 
 ## Build Boost for Mac OS X 10.9 and above
-$ port install boost +no_single +no_static +openmpi +python27
+$ port install boost +no_single -no_static +openmpi +python27
 ```
 
 #### OSX Manual compile:
@@ -198,3 +224,5 @@ To browse the code more easily, do
 `make doc`
 
 and then point your browser to `doc/html/index.html`.
+
+Note that documentation generates class diagrams using [Graphviz](https://www.graphviz.org). For best results, ensure that it is installed beforehand.

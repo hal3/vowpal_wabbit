@@ -86,55 +86,55 @@ struct BaseState
 
 	virtual BaseState<audit>* Bool(Context<audit>& ctx, bool b)
 	{
-		ctx.error << "Unexpected token: bool (" << (b ? "true" : "false") << ")";
+		ctx.error() << "Unexpected token: bool (" << (b ? "true" : "false") << ")";
 		return nullptr;
 	}
 
 	virtual BaseState<audit>* Float(Context<audit>& ctx, float v)
 	{
-		ctx.error << "Unexpected token: float (" << v << ")";
+		ctx.error() << "Unexpected token: float (" << v << ")";
 		return nullptr;
 	}
 
 	virtual BaseState<audit>* Uint(Context<audit>& ctx, unsigned v)
 	{
-		ctx.error << "Unexpected token: uint (" << v << ")";
+		ctx.error() << "Unexpected token: uint (" << v << ")";
 		return nullptr;
 	}
 
 	virtual BaseState<audit>* String(Context<audit>& ctx, const char* str, rapidjson::SizeType len, bool)
 	{
-		ctx.error << "Unexpected token: string('" << str << "' len: " << len << ")";
+		ctx.error() << "Unexpected token: string('" << str << "' len: " << len << ")";
 		return nullptr;
 	}
 
 	virtual BaseState<audit>* StartObject(Context<audit>& ctx)
 	{
-		ctx.error << "Unexpected token: {";
+		ctx.error() << "Unexpected token: {";
 		return nullptr;
 	}
 
 	virtual BaseState<audit>* Key(Context<audit>& ctx, const char* str, rapidjson::SizeType len, bool copy)
 	{
-		ctx.error << "Unexpected token: key('" << str << "' len: " << len << ")";
+		ctx.error() << "Unexpected token: key('" << str << "' len: " << len << ")";
 		return nullptr;
 	}
 
 	virtual BaseState<audit>* EndObject(Context<audit>& ctx, rapidjson::SizeType)
 	{
-		ctx.error << "Unexpected token: }";
+		ctx.error() << "Unexpected token: }";
 		return nullptr;
 	}
 
 	virtual BaseState<audit>* StartArray(Context<audit>& ctx)
 	{
-		ctx.error << "Unexpected token: [";
+		ctx.error() << "Unexpected token: [";
 		return nullptr;
 	}
 
 	virtual BaseState<audit>* EndArray(Context<audit>& ctx, rapidjson::SizeType)
 	{
-		ctx.error << "Unexpected token: ]";
+		ctx.error() << "Unexpected token: ]";
 		return nullptr;
 	}
 };
@@ -167,7 +167,7 @@ public:
 		// don't allow { { { } } }
 		if (ctx.previous_state == this)
 		{
-			ctx.error << "invalid label object. nested objected.";
+			ctx.error() << "invalid label object. nested objected.";
 			return nullptr;
 		}
 
@@ -220,7 +220,7 @@ public:
 		}
 		else
 		{
-			ctx.error << "Unsupported label property: '" << ctx.key << "' len: " << ctx.key_length;
+			ctx.error() << "Unsupported label property: '" << ctx.key << "' len: " << ctx.key_length;
 			return nullptr;
 		}
 
@@ -410,19 +410,20 @@ struct MultiState : BaseState<audit>
 	BaseState<audit>* StartArray(Context<audit>& ctx)
 	{
 		// mark shared example
-		// TODO: how to check if we're in CB mode (--cb?)
-		// if (ctx.all->p->lp == CB::cb_label) // not sure how to compare
-		{
-			CB::label* ld = (CB::label*)&ctx.ex->l;
-			CB::cb_class f;
+		if (ctx.all->label_type == label_type::cb)
+      {
+        CB::label* ld = &ctx.ex->l.cb;
+        CB::cb_class f;
 
-			f.partial_prediction = 0.;
-			f.action = (uint32_t)uniform_hash("shared", 6, 0);
-			f.cost = FLT_MAX;
-			f.probability = -1.f;
+        f.partial_prediction = 0.;
+        f.action = (uint32_t)uniform_hash("shared", 6, 0);
+        f.cost = FLT_MAX;
+        f.probability = -1.f;
 
-			ld->costs.push_back(f);
-		}
+        ld->costs.push_back(f);
+      }
+    else
+      THROW("label type is not CB")
 
 		return this;
 	}
@@ -463,7 +464,7 @@ public:
 	{
 		if (ctx.previous_state == this)
 		{
-			ctx.error << "Nested arrays are not supported";
+			ctx.error() << "Nested arrays are not supported";
 			return nullptr;
 		}
 
@@ -540,10 +541,9 @@ public:
 		// fast ignore
 		// skip key + \0 + "
 		char* head = ctx.stream->src_ + length + 2;
-
-		if (*head != ':')
+		if (head >= ctx.stream_end || *head != ':')
 		{
-			ctx.error << "Expected ':' found '" << *head << "'";
+			ctx.error() << "Expected ':' found '" << *head << "'";
 			return nullptr;
 		}
 		head++;
@@ -556,6 +556,9 @@ public:
 		{
 			switch (*head)
 			{
+			case '\0':
+				ctx.error() << "Found EOF";
+				return nullptr;
 			case '"':
 			{
 				// skip strings
@@ -565,6 +568,9 @@ public:
 					head++;
 					switch (*head)
 					{
+					case '\0':
+						ctx.error() << "Found EOF";
+						return nullptr;
 					case '\\':
 						head++;
 						break;
@@ -603,6 +609,12 @@ public:
 
 		// skip key + \0 + ":
 		char* value = ctx.stream->src_ + length + 3;
+		if (value >= ctx.stream_end)
+		{
+			ctx.error() << "Found EOF";
+			return nullptr;
+		}
+
 		*value = '0';
 		value++;
 		memset(value, ' ', head - value - 1);
@@ -631,7 +643,7 @@ public:
 					return &ctx.label_index_state;
 				else
 				{
-					ctx.error << "Unsupported key '" << str << "' len: " << length;
+					ctx.error() << "Unsupported key '" << str << "' len: " << length;
 					return nullptr;
 				}
 			}
@@ -706,7 +718,7 @@ public:
 				label_index++;
 				if (label_index >= (int)ctx.examples->size())
 				{
-					ctx.error << "_label_index out of bounds: " << (label_index - 1) << " examples available: " << ctx.examples->size() - 1;
+					ctx.error() << "_label_index out of bounds: " << (label_index - 1) << " examples available: " << ctx.examples->size() - 1;
 					return nullptr;
 				}
 
@@ -757,7 +769,7 @@ public:
   {
     if (ctx.previous_state == this)
     {
-      ctx.error << "Nested arrays are not supported";
+      ctx.error() << "Nested arrays are not supported";
       return nullptr;
     }
 
@@ -890,8 +902,8 @@ public:
         ctx.array_float_state.output_array = &data->probabilities;
         return &ctx.array_float_state;
       case 'c':
-		ctx.key = " ";
-		ctx.key_length = 1;
+		    ctx.key = " ";
+		    ctx.key_length = 1;
         return &ctx.default_state;
       }
     }
@@ -929,7 +941,7 @@ public:
 template<bool audit>
 struct Context
 { vw* all;
-  std::stringstream error;
+  std::stringstream* error_ptr;
 
   // last "<key>": encountered
   const char* key;
@@ -944,6 +956,7 @@ struct Context
   v_array<example*>* examples;
   example* ex;
   rapidjson::InsituStringStream* stream;
+  const char* stream_end;
 
   VW::example_factory_t example_factory;
   void* example_factory_context;
@@ -969,7 +982,7 @@ struct Context
 
 	BaseState<audit>* root_state;
 
-	Context()
+	Context() : error_ptr(nullptr)
 	{
 		namespace_path = v_init<Namespace<audit>>();
 		current_state = root_state = &default_state;
@@ -978,6 +991,9 @@ struct Context
 	~Context()
 	{
 		namespace_path.delete_v();
+
+    if (error_ptr)
+      delete error_ptr;
 	}
 
 	void init(vw* pall)
@@ -987,7 +1003,15 @@ struct Context
 		key_length = 1;
 		previous_state = nullptr;
 		label_object_state.init(pall);
+    error_ptr = nullptr;
 	}
+
+  std::stringstream& error() {
+    if (!error_ptr)
+      error_ptr = new std::stringstream;
+
+    return *error_ptr;
+  }
 
     void SetStartStateToDecisionService(DecisionServiceInteraction* data)
     {
@@ -1016,8 +1040,8 @@ struct Context
 		{
 			auto feature_group = ns.feature_group;
 			// avoid duplicate insertion
-			for (unsigned char ns : ex->indices)
-				if (ns == feature_group)
+			for (unsigned char ns_char : ex->indices)
+				if (ns_char == feature_group)
 					goto done;
 
 			ex->indices.push_back(feature_group);
@@ -1049,7 +1073,7 @@ struct VWReaderHandler : public rapidjson::BaseReaderHandler<rapidjson::UTF8<>, 
 {
 	Context<audit> ctx;
 
-	void init(vw* all, v_array<example*>* examples, rapidjson::InsituStringStream* stream, VW::example_factory_t example_factory, void* example_factory_context)
+	void init(vw* all, v_array<example*>* examples, rapidjson::InsituStringStream* stream, const char* stream_end, VW::example_factory_t example_factory, void* example_factory_context)
 	{
 		ctx.init(all);
 		ctx.examples = examples;
@@ -1057,6 +1081,7 @@ struct VWReaderHandler : public rapidjson::BaseReaderHandler<rapidjson::UTF8<>, 
 		all->p->lp.default_label(&ctx.ex->l);
 
 		ctx.stream = stream;
+		ctx.stream_end = stream_end;
 		ctx.example_factory = example_factory;
 		ctx.example_factory_context = example_factory_context;
 	}
@@ -1082,7 +1107,7 @@ struct VWReaderHandler : public rapidjson::BaseReaderHandler<rapidjson::UTF8<>, 
 	// alternative to above if we want to re-use the VW float parser...
 	bool RawNumber(const char* str, rapidjson::SizeType length, bool copy) { return false; }
 
-	std::stringstream& error() { return ctx.error; }
+	std::stringstream& error() { return ctx.error(); }
 
 	BaseState<audit>* current_state() { return ctx.current_state; }
 };
@@ -1105,7 +1130,7 @@ namespace VW
 		json_parser<audit>* parser = (json_parser<audit>*)all.p->jsonp;
 
 		VWReaderHandler<audit>& handler = parser->handler;
-		handler.init(&all, &examples, &ss, example_factory, ex_factory_context);
+		handler.init(&all, &examples, &ss, line + strlen(line), example_factory, ex_factory_context);
 
 		ParseResult result = parser->reader.template Parse<kParseInsituFlag, InsituStringStream, VWReaderHandler<audit>>(ss, handler);
 		if (!result.IsError())
@@ -1125,16 +1150,15 @@ namespace VW
 		std::vector<char> line_vec;
 		if (copy_line)
 		{
-			line_vec.reserve(length);
-			memcpy(&line_vec[0], line, length);
-			line = &line_vec[0];
+			line_vec.insert(line_vec.end(), line, line + length);
+			line = &line_vec.front();
 		}
 
       InsituStringStream ss(line);
       json_parser<audit> parser;
 
       VWReaderHandler<audit>& handler = parser.handler;
-      handler.init(&all, &examples, &ss, example_factory, ex_factory_context);
+      handler.init(&all, &examples, &ss, line + length, example_factory, ex_factory_context);
       handler.ctx.SetStartStateToDecisionService(data);
 
       ParseResult result = parser.reader.template Parse<kParseInsituFlag, InsituStringStream, VWReaderHandler<audit>>(ss, handler);
@@ -1152,27 +1176,37 @@ namespace VW
 template<bool audit>
 int read_features_json(vw* all, v_array<example*>& examples)
 {
-	char* line;
-	size_t num_chars;
-	size_t num_chars_initial = read_features(all, line, num_chars);
-	if (num_chars_initial < 1)
-		return (int)num_chars_initial;
+  bool reread;
+  do
+  {
+    reread = false;
 
-	line[num_chars] = '\0';
-	if (all->p->decision_service_json)
-	{
-		DecisionServiceInteraction interaction;
-		VW::template read_line_decision_service_json<audit>(*all, examples, line, num_chars, false, reinterpret_cast<VW::example_factory_t>(&VW::get_unused_example), all, &interaction);
-	}
-	else
-		VW::template read_line_json<audit>(*all, examples, line, reinterpret_cast<VW::example_factory_t>(&VW::get_unused_example), all);
+    char* line;
+    size_t num_chars;
+    size_t num_chars_initial = read_features(all, line, num_chars);
+    if (num_chars_initial < 1)
+      return (int)num_chars_initial;
+
+    line[num_chars] = '\0';
+    if (all->p->decision_service_json)
+    {
+      DecisionServiceInteraction interaction;
+      VW::template read_line_decision_service_json<audit>(*all, examples, line, num_chars, false, reinterpret_cast<VW::example_factory_t>(&VW::get_unused_example), all, &interaction);
+
+      // let's continue reading data until we find a line with actions provided
+      if (interaction.actions.size() == 0)
+        reread = true;
+    }
+    else
+      VW::template read_line_json<audit>(*all, examples, line, reinterpret_cast<VW::example_factory_t>(&VW::get_unused_example), all);
+  } while (reread);
 
 	// note: the json parser does single pass parsing and cannot determine if a shared example is needed.
 	// since the communication between the parsing thread the main learner expects examples to be requested in order (as they're layed out in memory)
 	// there is no way to determine upfront if a shared example exists
 	// thus even if there are no features for the shared example, still an empty example is returned.
 
-	if (examples.size() > 1)
+  if (examples.size() > 1)
 	{ // insert new line example at the end
 		example& ae = VW::get_unused_example(all);
 		char empty = '\0';

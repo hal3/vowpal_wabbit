@@ -371,6 +371,8 @@ public:
 	  }
         else tmp += c;
       }
+
+      /*
       ex(tmp.get('w'));
       
       // input focus
@@ -386,6 +388,9 @@ public:
 	}
       
       ref.erase();
+      */
+      ex("w=" + tmp);
+      ref.clear();
 
       // remaining character count
       ex(vw_namespace('R'));

@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
 # pylint: unused-argument, invalid-name, too-many-arguments, too-many-locals
-
-"""
-Utilities to support integration of Vowpal Wabbit and scikit-learn
-"""
+"""Utilities to support integration of Vowpal Wabbit and scikit-learn"""
 
 import numpy as np
 import re
@@ -380,7 +377,7 @@ class VW(BaseEstimator):
 
     def __del__(self):
         if hasattr(self, 'vw_') and self.vw_ is not None:
-            self.vw_.__del__()
+            del self.vw_
 
     def get_params(self, deep=True):
         """This returns the set of vw and estimator parameters currently in use"""
@@ -447,9 +444,11 @@ class VW(BaseEstimator):
         return self.get_vw().get_weight(CONSTANT_HASH)
 
     def save(self, filename):
+        """Save model to file"""
         joblib.dump(dict(params=self.get_params(), coefs=self.get_coefs(), fit=self.fit_), filename=filename)
 
     def load(self, filename):
+        """Load model from file"""
         obj = joblib.load(filename=filename)
         self.set_params(**obj['params'])
         self.set_coefs(obj['coefs'])
@@ -506,6 +505,22 @@ class VWClassifier(SparseCoefMixin, ThresholdingLinearClassifierMixin, VW):
             params['loss_function'] = 'logistic'
 
         super(VWClassifier, self).__init__(**params)
+
+    def predict(self, X):
+        """Predict class labels for samples in X.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix}, shape = [n_samples, n_features]
+            Samples.
+
+        Returns
+        -------
+        C : array, shape = [n_samples]
+            Predicted class label per sample.
+        """
+
+        return ThresholdingLinearClassifierMixin.predict(self, X=X)
 
     def decision_function(self, X):
         """Predict confidence scores for samples.

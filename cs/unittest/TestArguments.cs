@@ -1,9 +1,10 @@
-﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using VW;
 
@@ -13,6 +14,7 @@ namespace cs_unittest
     public class TestArgumentsClass
     {
         [TestMethod]
+        [TestCategory("Vowpal Wabbit")]
         public void TestArguments()
         {
             using (var vw = new VowpalWabbit(new VowpalWabbitSettings("--cb_explore_adf --epsilon 0.3 --interact ud") { Verbose = true }))
@@ -47,6 +49,7 @@ namespace cs_unittest
         }
 
         [TestMethod]
+        [TestCategory("Vowpal Wabbit")]
         public void TestQuietAndTestArguments()
         {
             using (var vw = new VowpalWabbit("--quiet -t"))
@@ -85,6 +88,7 @@ namespace cs_unittest
         }
 
         [TestMethod]
+        [TestCategory("Vowpal Wabbit")]
         public void TestArgumentDeDup()
         {
             using (var vw = new VowpalWabbit("-l 0.3 -l 0.3 --learning_rate 0.3 -f model1 --save_resume -q ab")) 
@@ -94,9 +98,11 @@ namespace cs_unittest
 
             try
             {
-                using (var vw = new VowpalWabbit("-l 0.3 -l 0.3 --learning_rate 0.1 -f model1 --save_resume -q ab"))
+                using (var vw =
+                    new VowpalWabbit(
+                        "--cb 2 --cb_type ips --cb_type dm --learning_rate 0.1 -f model_bad --save_resume -q ab"))
                 {
-                    Assert.AreEqual(0.3f, vw.Native.Arguments.LearningRate);
+                    Assert.AreEqual(0.1f, vw.Native.Arguments.LearningRate);
                 }
 
                 Assert.Fail("Disagreering arguments not detected");

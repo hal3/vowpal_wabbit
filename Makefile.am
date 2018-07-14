@@ -11,7 +11,6 @@ nobase_include_HEADERS = vowpalwabbit/allreduce.h \
 	vowpalwabbit/parse_example.h \
 	vowpalwabbit/floatbits.h \
 	vowpalwabbit/global_data.h \
-	vowpalwabbit/hash.h \
 	vowpalwabbit/io_buf.h \
 	vowpalwabbit/learner.h \
 	vowpalwabbit/loss_functions.h \
@@ -36,6 +35,7 @@ nobase_include_HEADERS = vowpalwabbit/allreduce.h \
 
 noinst_HEADERS = vowpalwabbit/accumulate.h \
 	vowpalwabbit/autolink.h \
+	vowpalwabbit/baseline.h \
 	vowpalwabbit/bfgs.h \
 	vowpalwabbit/binary.h \
 	vowpalwabbit/bs.h \

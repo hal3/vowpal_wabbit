@@ -16,7 +16,8 @@ using namespace std;
 using namespace LEARNER;
 
 struct mf
-{ vector<string> pairs;
+{
+  vector<string> pairs;
 
   size_t rank;
 
@@ -39,8 +40,9 @@ struct mf
 };
 
 template <bool cache_sub_predictions>
-void predict(mf& data, base_learner& base, example& ec)
-{ float prediction = 0;
+void predict(mf& data, single_learner& base, example& ec)
+{
+  float prediction = 0;
   if (cache_sub_predictions)
     data.sub_predictions.resize(2*data.rank+1);
 
@@ -56,17 +58,20 @@ void predict(mf& data, base_learner& base, example& ec)
   copy_array(data.predict_indices, ec.indices);
 
   // erase indices
-  ec.indices.erase();
+  ec.indices.clear();
   ec.indices.push_back(0);
 
   // add interaction terms to prediction
   for (string& i : data.pairs)
-  { int left_ns = (int) i[0];
+  {
+    int left_ns = (int) i[0];
     int right_ns = (int) i[1];
 
     if (ec.feature_space[left_ns].size() > 0 && ec.feature_space[right_ns].size() > 0)
-    { for (size_t k = 1; k <= data.rank; k++)
-      { ec.indices[0] = left_ns;
+    {
+      for (size_t k = 1; k <= data.rank; k++)
+      {
+        ec.indices[0] = left_ns;
 
         // compute l^k * x_l using base learner
         base.predict(ec, k);
@@ -96,8 +101,9 @@ void predict(mf& data, base_learner& base, example& ec)
   ec.pred.scalar = GD::finalize_prediction(data.all->sd, ec.partial_prediction);
 }
 
-void learn(mf& data, base_learner& base, example& ec)
-{ // predict with current weights
+void learn(mf& data, single_learner& base, example& ec)
+{
+  // predict with current weights
   predict<true>(data, base, ec);
   float predicted = ec.pred.scalar;
 
@@ -109,7 +115,7 @@ void learn(mf& data, base_learner& base, example& ec)
   copy_array(data.indices, ec.indices);
 
   // erase indices
-  ec.indices.erase();
+  ec.indices.clear();
   ec.indices.push_back(0);
 
   // update interaction terms
@@ -130,7 +136,8 @@ void learn(mf& data, base_learner& base, example& ec)
       data.temp_features.deep_copy_from(ec.feature_space[left_ns]);
 
       for (size_t k = 1; k <= data.rank; k++)
-      { features& fs = ec.feature_space[left_ns];
+      {
+        features& fs = ec.feature_space[left_ns];
         // multiply features in left namespace by r^k * x_r
         for (size_t i= 0; i < fs.size(); ++i)
           fs.values[i] *= data.sub_predictions[2*k];
@@ -154,7 +161,8 @@ void learn(mf& data, base_learner& base, example& ec)
       data.temp_features.deep_copy_from(ec.feature_space[right_ns]);
 
       for (size_t k = 1; k <= data.rank; k++)
-      { features& fs = ec.feature_space[right_ns];
+      {
+        features& fs = ec.feature_space[right_ns];
         // multiply features in right namespace by l^k * x_l
         for (size_t i = 0; i < fs.size(); ++i)
           fs.values[i] *= data.sub_predictions[2*k-1];
@@ -176,7 +184,8 @@ void learn(mf& data, base_learner& base, example& ec)
 }
 
 void finish(mf& o)
-{ // restore global pairs
+{
+  // restore global pairs
   o.all->pairs = o.pairs;
 
   // clean up local v_arrays
@@ -184,22 +193,22 @@ void finish(mf& o)
   o.sub_predictions.delete_v();
 }
 
-base_learner* mf_setup(vw& all)
-{ if (missing_option<size_t, true>(all, "new_mf", "rank for reduction-based matrix factorization"))
+base_learner* mf_setup(arguments& arg)
+{
+  auto data = scoped_calloc_or_throw<mf>();
+  if (arg.new_options("Matrix Factorization Reduction")
+      .critical("new_mf", data->rank, "rank for reduction-based matrix factorization").missing())
     return nullptr;
 
-  mf& data = calloc_or_throw<mf>();
-  data.all = &all;
-  data.rank = (uint32_t)all.vm["new_mf"].as<size_t>();
-
+  data->all = arg.all;
   // store global pairs in local data structure and clear global pairs
   // for eventual calls to base learner
-  data.pairs = all.pairs;
-  all.pairs.clear();
+  data->pairs = arg.all->pairs;
+  arg.all->pairs.clear();
 
-  all.random_positive_weights = true;
+  arg.all->random_positive_weights = true;
 
-  learner<mf>& l = init_learner(&data, setup_base(all), learn, predict<false>, 2*data.rank+1);
+  learner<mf,example>& l = init_learner(data, as_singleline(setup_base(arg)), learn, predict<false>, 2*data->rank+1);
   l.set_finish(finish);
   return make_base(l);
 }

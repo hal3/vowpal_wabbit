@@ -7,6 +7,7 @@ shallow_clone: true
 clone_folder: C:\vowpal_wabbit
 # need to install nuget packages before Visual Studio starts to make ANTLR targets available.
 build_script:
+- vcpkg install cpprestsdk:x64-windows
 - cd c:\vowpal_wabbit
 - vowpalwabbit\.nuget\nuget install -o vowpalwabbit\packages cs\cs\packages.config
 - vowpalwabbit\.nuget\nuget install -o vowpalwabbit\packages cs\azure\packages.config
@@ -23,7 +24,7 @@ test_script:
 
     {
        cd c:\vowpal_wabbit
-       vstest.console /Platform:x64 /inIsolation vowpalwabbit\x64\Release\cs_unittest.dll
+       vstest.console /Platform:x64 /inIsolation vowpalwabbit\x64\Release\cs_unittest.dll /TestCaseFilter:"TestCategory!=NotOnVSO"
     }
 on_failure:
 - ps: Get-ChildItem C:\Users\appveyor\AppData\Local\CrashDumps\\*.dmp | % { Push-AppveyorArtifact $_.FullName -FileName $_.Name }
