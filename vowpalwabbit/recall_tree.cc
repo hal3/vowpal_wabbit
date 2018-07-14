@@ -326,7 +326,18 @@ predict_type predict_from (recall_tree& b,
 
 void predict (recall_tree& b,  base_learner& base, example& ec)
 { predict_type pred = predict_from (b, base, ec, 0);
-
+  if (b.all->raw_prediction > 0)
+    {
+      string str("");
+      stringstream out(str);
+      uint32_t cn = pred.node_id;
+      while (cn > 0)
+	{ uint32_t par = b.nodes[cn].parent;
+	  out << ((b.nodes[par].left == cn) ? '0' : '1');
+	  cn = par;
+	}
+      b.all->print_text(b.all->raw_prediction, out.str(), ec.tag);
+    }
   ec.pred.multiclass = pred.class_prediction;
 }
 

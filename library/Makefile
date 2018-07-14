@@ -20,7 +20,7 @@ ezexample_predict: ezexample_predict.cc ../vowpalwabbit/libvw.a ../vowpalwabbit/
 	$(CXX) -g $(FLAGS) -o $@ $< $(VWLIBS) $(STDLIBS)
 
 ezexample_predict_threaded: ezexample_predict_threaded.cc ../vowpalwabbit/libvw.a ../vowpalwabbit/liballreduce.a
-	$(CXX) -g $(FLAGS)  -o $@ $< $(VWLIBS) $(BOOST_PROGRAM_OPTIONS) -l z -l boost_thread
+	$(CXX) -g $(FLAGS) -o $@ $< $(VWLIBS) $(BOOST_PROGRAM_OPTIONS) -l z -l boost_thread
 
 ezexample_train: ezexample_train.cc ../vowpalwabbit/libvw.a ../vowpalwabbit/liballreduce.a
 	$(CXX) -g $(FLAGS) -o $@ $< $(VWLIBS) $(STDLIBS)
@@ -32,7 +32,7 @@ test_search: test_search.cc ../vowpalwabbit/libvw.a ../vowpalwabbit/liballreduce
 	$(CXX) -g $(FLAGS) -o $@ $< $(VWLIBS) $(STDLIBS)
 
 search_generate: search_generate.cc ../vowpalwabbit/libvw.a
-	$(CXX) -g $(FLAGS) -o $@ $< $(VWLIBS) $(STDLIBS)
+	$(CXX) $(FLAGS) -o $@ $< $(VWLIBS) $(STDLIBS)
 
 recommend: recommend.cc ../vowpalwabbit/libvw.a ../vowpalwabbit/liballreduce.a
 	$(CXX) -g $(FLAGS) -o $@ $< $(VWLIBS) $(STDLIBS)

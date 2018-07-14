@@ -13,7 +13,7 @@ VW_RUN = $(subst $(space),_,$(VW_OPTS))
 
 RM = rm -f
 # Python > 2.7 is required
-PYTHON = python
+PYTHON = python2
 
 help:
 	@echo handwritten words dataset collected by

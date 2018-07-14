@@ -10,18 +10,35 @@
 
 size_t sed(const string &s1, const string &s2, size_t subst_cost=1, size_t ins_cost=1, size_t del_cost=1);
 
-action char2action(char c)    // 1=EOS, 2=' ', 3..28=a..z, 29=other
-{ if (c == '$') return 1;
-  if (c == ' ') return 2;
-  if (c >= 'a' && c <= 'z') return (action)(c - 'a' + 3);
-  return 29;
+#define myhash(a,b) 93187*(3891*a + 89307*b)
+
+char _action2char[256];
+action _char2action[256];
+
+int EOS=1, OOV=2, SKIP=3, COPY=4, N_SPECIAL=5;
+action n_actions;
+
+void setup_character_tables(string& charlist)
+{ for (int i=0; i<256; i++)
+    { _action2char[i] = 0;
+      _char2action[i] = OOV;
+    }
+  for (int i=0; i<min(255, charlist.length()); i++)
+    { _action2char[i+N_SPECIAL] = charlist[i];
+      _char2action[charlist[i]] = i+N_SPECIAL;
+    }
+  n_actions = N_SPECIAL + charlist.length();
 }
 
-char action2char(action a)
-{ if (a == 1) return '$';
-  if (a == 2) return ' ';
-  if (a >= 3 && a <= 28) return (char)(a - 3 + 'a');
-  return '_';
+action char2action(char c)
+{ if (c < N_SPECIAL) return c;
+  return _char2action[c];
+}
+
+char action2char(action i)
+{ if (i > n_actions) throw exception();
+  if (i < N_SPECIAL) return i;
+  return _action2char[i];
 }
 
 struct nextstr
@@ -30,6 +47,23 @@ struct nextstr
   string s;
   float sw;
   nextstr(char _c, float _cw, string _s, float _sw) : c(_c), cw(_cw), s(_s), sw(_sw) {}
+};
+
+class notstring
+{
+public:
+  notstring() { reset((uint32_t)' '); }
+  notstring(char c) { reset((uint32_t)c); }
+
+  void reset(uint32_t c) { d = 48390131; d = append(c); }
+  
+  notstring& operator+=(char c) { d = append((uint32_t)c); return *this; }
+  uint32_t get(char c) { return append((uint32_t)c); }
+
+  uint32_t append(uint32_t i) { return 34810347 * (d + i * 3489101); }
+  
+private:
+  uint32_t d;
 };
 
 class Trie
@@ -77,7 +111,7 @@ public:
   { if (prefix == nullptr || *prefix == 0)
     { next.clear();
       float c = 1. / (float)count;
-      next.push_back( nextstr('$', log(1. + c * (float)terminus), max_string, log(1. + (float)max_count)) );
+      next.push_back( nextstr(EOS, log(1. + c * (float)terminus), max_string, log(1. + (float)max_count)) );
       for (size_t id=0; id<children.size(); id++)
         if (children[id])
           next.push_back( nextstr(action2char(id+1), c*(float)children[id]->count, children[id]->max_string, log(1.+ (float)children[id]->max_count)) );
@@ -112,6 +146,8 @@ public:
         children[i]->print(action2char(i+1), indent+1);
   }
 
+    
+  
 private:
   size_t terminus;   // count of words that end here?
   size_t count;      // count of all words under here (including us)
@@ -156,21 +192,28 @@ public:
   { A.clear();
     for (size_t n=0; n<=N; n++)
     { if (prev_row[n] == prev_row_min)
-        A.push_back( (n < N) ? target[n] : '$' );
+        A.push_back( (n < N) ? target[n] : EOS );
     }
     return A;
   }
 
   float minf(float a, float b) { return (a < b) ? a : b; }
 
-  vector< pair<action,float> > all_next()
+  vector< pair<action,float> > all_next(unsigned int input_pos, string& in_in)
   { vector< pair<action,float> > B;
-    for (size_t a=1; a<=29; a++)
+    for (size_t a=1; a<=n_actions; a++)
       B.push_back( make_pair(a, 1.) );
-    B[ char2action('$')-1 ].second = minf(100., (float)(prev_row[N] - prev_row_min));
+    B[ char2action(EOS)-1 ].second = minf(100., (float)(prev_row[N] - prev_row_min));
     for (size_t n=0; n<N; n++)
       if (prev_row[n] == prev_row_min)
-        B[ char2action(target[n])-1 ].second = 0.;
+	//{ cerr << n << "," << target[n] << ' '; 
+	  B[ char2action(target[n])-1 ].second = 0.; 
+    //cerr << "{" << in_in[input_pos] << ":" << char2action(in_in[input_pos]) << "}";
+    B[ char2action(COPY)-1 ].second = B[ char2action(in_in[input_pos])-1 ].second;
+    int skip = char2action(SKIP)-1; // skip
+    if (input_pos+1 < in_in.length()) B[skip].second = min(B[skip].second, B[char2action(in_in[input_pos+1])-1].second+0.2);
+    if (input_pos+2 < in_in.length()) B[skip].second = min(B[skip].second, B[char2action(in_in[input_pos+2])-1].second+0.5);
+    //cerr << "costs = <"; for (size_t a=0; a<n_actions; a++) cerr << " " << (int)action2char(B[a].first) << "," << B[a].second; cerr << " >"; cerr
     return B;
   }
 
@@ -226,7 +269,7 @@ public:
   Generator(vw& vw_obj, Trie* _dict=nullptr) : SearchTask<input,output>(vw_obj), dist(0), dict(_dict)    // must run parent constructor!
   { sch.set_options( Search::AUTO_CONDITION_FEATURES | Search::NO_CACHING | Search::ACTION_COSTS );  // TODO: if action costs is specified but no allowed actions provided, don't segfault :P
     HookTask::task_data& d = *sch.get_task_data<HookTask::task_data>();
-    if (d.num_actions != 29) throw exception();
+    if (d.num_actions != n_actions) throw exception();
   }
 
   void _run(Search::search& sch, input& in, output& out)
@@ -234,45 +277,61 @@ public:
 
     Trie* cdict = dict;
 
+    int remaining_char_count[256];
+    for (size_t i=0; i<256; i++) remaining_char_count[i] = 0;
+    
+    //cerr << "--------------" << endl;
     v_array<action> ref = v_init<action>();
     int N = in.in.length();
-    out = "^";
+
+    for (size_t n=0; n<in.in.length(); n++)
+      remaining_char_count[in.in[n]]++;
+    
+    out = "";
     vector<nextstr> next;
-    for (int m=1; m<=N*2; m++)     // at most |in|*2 outputs
+    unsigned int input_pos=0;
+    for (int m=1; m<=N*1.2; m++)     // at most |in|*1.2 outputs
     { ezexample ex(&vw_obj);
 
       // length info
       ex(vw_namespace('l'))
-      ("in", (float)N)
-      ("out", (float)m);
+	(myhash('l', 'N'), (float)N)
+	(myhash('l', 'm'), (float)m);
       if (N != m)
-        ex("diff", (float)(N-m));
+        ex(myhash('l', 'd'), (float)(N-m));
 
       // suffixes thus far
       ex(vw_namespace('s'));
-      string tmp("$");
-      for (int i=m; i >= m-15 && i >= 0; i--)
-      { tmp = out[i] + tmp;
-        ex("p=" + tmp);
+      notstring tmp('s');
+      for (int i=out.length(); i >= m-15 && i >= 0; i--)
+	{ tmp += out[i]; // tmp = out[i] + tmp;
+	  ex(tmp.get('p'));
+	  //ex("p=" + tmp);
       }
 
       // characters thus far
       ex(vw_namespace('c'));
-      for (char c : out) ex("c=" + string(1,c));
-      ex("c=$");
+      ex(myhash('c', 1));
+      for (char c: out) ex(myhash('c', c));
+      ex(myhash('c', 2));
+      //ex("c=^");
+      //for (char c : out) ex("c=" + string(1,c));
+      //ex("c=$");
 
       // words thus far
       ex(vw_namespace('w'));
-      tmp = "";
+      tmp.reset('w');
       for (char c : out)
       { if (c == '^') continue;
         if (c == ' ')
-        { ex("w=" + tmp + "$");
-          tmp = "";
-        }
+	  { ex(tmp.get('w'));
+	    tmp.reset('w');
+	    //ex("w=" + tmp + "$");
+	    //tmp = "";
+	  }
         else tmp += c;
       }
-      ex("w=" + tmp);
+      ex(tmp.get('w')); 
 
       // do we match the trie?
       if (cdict)
@@ -281,34 +340,59 @@ public:
         ex(vw_namespace('d'));
         char best_char = '~'; float best_count = 0.;
         for (auto xx : next)
-        { if (xx.cw > 0.) ex("c=" + string(1,xx.c), xx.cw);
-          if (xx.sw > 0.) ex("mc=" + xx.s, xx.sw);
-          if (xx.sw > best_count) { best_count = xx.sw; best_char = xx.c; }
-        }
+	  { if (xx.cw > 0.) ex(myhash('d', myhash('c', xx.c)), xx.cw);
+	    if (xx.sw > 0.) ex("mc=" + xx.s, xx.sw);
+	    if (xx.sw > best_count) { best_count = xx.sw; best_char = xx.c; }
+	  }
         if (best_count > 0.)
-          ex("best=" + string(1,best_char), best_count);
+          ex(myhash('d', myhash('b', best_char)), best_count);
       }
 
-      // input
+      // input characters
+      ex(vw_namespace('C'));
+      ex(myhash('C', 1));
+      for (int n=0; n<N; n++)
+	ex(myhash('C', in.in[n]));
+      ex(myhash('C', 2));
       /*
-      ex(vw_namespace('i'));
       ex("c=^");
       for (int n=0; n<N; n++)
         ex("c=" + in.in[n]);
       ex("c=$");
       */
-      ex(vw_namespace('i'));
-      tmp = "";
+
+      // input words
+      ex(vw_namespace('W'));
+      tmp.reset('W');
       for (char c : in.in)
       { if (c == ' ')
-        { ex("w=" + tmp);
-          tmp = "";
-        }
+	  { ex(tmp.get('w'));
+	    tmp.reset('W');
+	  }
         else tmp += c;
       }
-      ex("w=" + tmp);
-
+      ex(tmp.get('w'));
+      
+      // input focus
+      ex(vw_namespace('f'));
+      tmp.reset('f');
+      for (int delta=1; delta<=5; delta++)
+	{ int d = (delta / 2);
+	  if (delta % 2 == 1) d = -d;
+	  int j = input_pos+d;
+	  char c = (j < 0) ? '^' : (j >= N) ? '$' : in.in[j];
+	  tmp += c;
+	  ex(tmp.get('p'));
+	}
+      
       ref.erase();
+
+      // remaining character count
+      ex(vw_namespace('R'));
+      for (size_t i=0; i<255; i++)
+	if (remaining_char_count[i] > 0)
+	  ex(myhash('R', myhash(i, remaining_char_count[i])));
+      
 
       /*
       vector<char>& best = ied.next();
@@ -320,16 +404,36 @@ public:
                             .predict() );
       */
 
-      vector< pair<action,float> > all = ied.all_next();
-      char c = action2char( Search::predictor(sch, m)
+      //cerr << "'" << out << "' ";
+      vector< pair<action,float> > all = ied.all_next(input_pos, in.in);
+      bool copy_ok = false;
+      for (auto p : all)
+	if (p.second == 0)
+	  { ref.push_back(p.first);
+	    if (p.first == COPY) copy_ok = true;
+	  }
+      if (copy_ok)
+	{ ref.erase();
+	  ref.push_back(COPY);
+	}
+      action act = Search::predictor(sch, m)
                             .set_input(* ex.get())
                             .set_allowed(all)
-                            .predict() );
-
-      if (c == '$') break;
-      out += c;
-      ied.append(c);
-      if (cdict) cdict = cdict->step(c);
+	// 	                    .set_oracle(ref)
+                            .predict();
+      //cerr << " (" << act << " -> " << (int)action2char(act) << ")" << endl;
+      char c = action2char( act );
+      if (c == EOS) break;
+      if (c == OOV) c = '?';
+      if (c == COPY) c = in.in[input_pos];
+      if (c != SKIP) // insert
+	{ out += c;
+	  ied.append(c);
+	  if (cdict) cdict = cdict->step(c);
+	  if (remaining_char_count[c] > 0)
+	    remaining_char_count[c] --;
+	}
+      input_pos = min(input_pos+1, N-1);
     }
 
     dist = ied.finish_distance();
@@ -343,8 +447,23 @@ private:
   Trie* dict;
 };
 
+class Counter
+{
+public:
+  Counter() : num(0.), den(0.) {}
+  void add(float multiplier, float weight=1.0)
+  { den += weight;
+    num += multiplier * weight;
+  }
+  void reset() { num = 0.; den = 0.; }
+  float get() { return num / max(den, 1.0); }
+  
+private:
+  float num, den;
+};
+
 void run_easy()
-{ vw& vw_obj = *VW::initialize("--search 29 --quiet --search_task hook --ring_size 1024 --search_rollin learn --search_rollout none");
+{ vw& vw_obj = *VW::initialize("--search 31 --quiet --search_task hook --ring_size 1024 --search_rollin learn --search_rollout none");
   Generator task(vw_obj);
   output out("");
 
@@ -408,49 +527,78 @@ void run_istream(Generator& gen, const char* fname, bool is_learn=true, size_t p
   string line;
   output out;
   size_t n = 0;
-  float dist = 0.;
-  float weight = 0.;
+
+  Counter dist, exact, dist_diff, exact_diff;
   while (getline(h, line))
   { n++;
-    if (n % 500 == 0) cerr << '.';
+    //if (n % 500 == 0) cerr << '.';
     size_t i = line.find(" ||| ");
     size_t j = line.find(" ||| ", i+1);
-    if (i == string::npos || j == string::npos)
+    size_t k = line.find(" ||| ", j+1);
+    if (i == string::npos || j == string::npos || k == string::npos)
     { cerr << "skipping line " << n << ": '" << line << "'" << endl;
       continue;
     }
-    input dat(line.substr(j+5), line.substr(i+5,j-i-5), atof(line.substr(0,i).c_str())/10.);
+    input dat(line.substr(i+5,j-i-5), line.substr(j+5,k-j-5), atof(line.substr(0,i).c_str())/10.);
     //cerr << "count=" << dat.weight << ", in='" << dat.in << "', out='" << dat.out << "'" << endl;
-    weight += dat.weight;
+    //weight += dat.weight;
+
+    if ((not is_learn) || ((print_every>0) && (n % print_every == 0) || (n % 10 == 0)))
+      {
+	gen.predict(dat, out);
+	int this_dist = gen.get_dist();
+	assert((this_dist > 0) == (out != dat.out));
+
+	dist.add((float)this_dist, dat.weight);
+	exact.add((this_dist == 0) ? 1.0 : 0.0, dat.weight);
+	bool same = true;
+	if (dat.in != dat.out)
+	  { dist_diff.add((float)this_dist, dat.weight);
+	    exact_diff.add((this_dist == 0) ? 1.0 : 0.0, dat.weight);
+	    same = false;
+	  }
+    
+	//dist += dat.weight * (float)this_dist;
+	//if (this_dist == 0) exact += dat.weight;
+	if (print_every>0 && (n % print_every == 0))
+	  cerr << n << "\t dist=" << dist.get() << " exact=" << exact.get() << " [diff dist=" << dist_diff.get() << " exact=" << exact_diff.get() << " ||| ex same=" << same << " dist=" << this_dist << " input=^" << dat.in << "$  truth=^" << dat.out << "$ pred=^" << out << "$" << endl;
+      }
+    
     if (is_learn)
       gen.learn(dat, out);
-    else
-    { gen.predict(dat, out);
-      if (print_every>0 && (n % print_every == 0))
-        cout << gen.get_dist() << "\t" << out << "\t\t\t" << dat.in << " ||| " << dat.out << endl;
-      dist += dat.weight * (float)gen.get_dist();
-    }
   }
-  if (n > 500) cerr << endl;
+  //if (n > 500) cerr << endl;
   if (!is_learn)
-    cout << "AVERAGE DISTANCE: " << (dist / weight) << endl;
+    { cerr << "AVERAGE DISTANCE: " << dist.get() << " [on diff only: " << dist_diff.get() << "]" << endl;
+      cerr << "     EXACT MATCH: " << exact.get() << " [on diff only: " << exact_diff.get() << "]" << endl;
+    }
 }
 
 void train()
 { // initialize VW as usual, but use 'hook' as the search_task
-  Trie dict = load_dictionary("phrase-table.vocab");
+  Trie dict = load_dictionary("speller/short.vocab");
   dict.build_max();
   //dict.print();
 
-  string init_str("--search 29 -b 28 --quiet --search_task hook --ring_size 1024 --search_rollin learn --search_rollout none -q i: --ngram i15 --skips i5 --ngram c15 --ngram w6 --skips c3 --skips w3"); //  --search_use_passthrough_repr"); // -q si -q wi -q ci -q di  -f my_model
+  //namespaces:
+  //  l: length info
+  //  s: output suffixes
+  //  c: output characters
+  //  w: output words
+  //  d: output trie
+  //  C: input characters
+  //  W: input words
+  //  f: input focus
+  //  R: remaining characters
+  string init_str("--search " + std::to_string(n_actions) + " -l 0.1 -b 29 --quiet --search_task hook --ring_size 1024 --search_rollin ref --search_rollout none -qi: --ngram c5 --skips c2 --ngram w2 --ngram C5 --skips c2 --ngram W2"); //  --search_use_passthrough_repr"); // -q si -q wi -q ci -q di  -f my_model
   vw& vw_obj = *VW::initialize(init_str);
   cerr << init_str << endl;
   Generator gen(vw_obj, nullptr); // &dict);
-  for (size_t pass=1; pass<=20; pass++)
+  for (size_t pass=1; pass<=1; pass++)
   { cerr << "===== pass " << pass << " =====" << endl;
-    run_istream(gen, "phrase-table.tr", true);
-    run_istream(gen, "phrase-table.tr", false, 300000);
-    run_istream(gen, "phrase-table.te", false, 100000);
+    run_istream(gen, "speller/short.tr", true, 10000);
+    //run_istream(gen, "speller/short.tr", false, 1); //300000);
+    run_istream(gen, "speller/short.te", false, 10000); //100000);
   }
   VW::finish(vw_obj);
 }
@@ -491,8 +639,35 @@ int main(int argc, char *argv[])
   cerr << "final: " << ied.distance() << "\t" << ied.out() << endl;
   return 0;
   */
+  string charlist("abcdefghijklmnopqrstuvwxyz0123456789 ");
+  if (argc > 1)
+    charlist = string(argv[1]) + " ";
+  cerr << "charlist = [" << charlist << "]" << endl;
+  setup_character_tables(charlist);
+  cerr << "n_actions = " << n_actions << endl;
   train();
   //predict();
   //run_easy();
 }
 
+/**
+with strings
+
+$ time ./search_generate
+charlist = [abcdefghijklmnopqrstuvwxyz0123456789 ]
+n_actions = 42
+--search 42 -l 0.1 -b 29 --quiet --search_task hook --ring_size 1024 --search_rollin ref --search_rollout none -qi: --ngram c5 --skips c2 --ngram w2 --ngram C5 --skips c2 --ngram W2
+===== pass 1 =====
+10000    dist=2.58789 exact=0.0424242 [diff dist=2.70544 exact=0.00543478 ||| ex same=0 dist=2 input=^when do marajuna plants bud$  truth=^when do marijuana plants bud$ pred=^when do marajuna plants bud$
+10000    dist=2.06898 exact=0.0619616 [diff dist=2.20361 exact=0.00925925 ||| ex same=0 dist=2 input=^ie skating animations$  truth=^ice skating animations$ pred=^ie skating animation$
+AVERAGE DISTANCE: 2.06898 [on diff only: 2.20361]
+     EXACT MATCH: 0.0619616 [on diff only: 0.00925925]
+
+real    0m58.902s
+user    0m50.906s
+sys     0m6.734s
+
+
+without strings
+
+**/
