@@ -347,14 +347,33 @@ void do_actual_learning_oaa(ldf& data, single_learner& base, size_t start_K, mul
   size_t K = ec_seq.size();
   float  min_cost  = FLT_MAX;
   float  max_cost  = -FLT_MAX;
+  float  sum_costs = 0.;
 
   for (size_t k=start_K; k<K; k++)
   {
     float ec_cost = ec_seq[k]->l.cs.costs[0].x;
+    sum_costs += ec_cost;
     if (ec_cost < min_cost) min_cost = ec_cost;
     if (ec_cost > max_cost) max_cost = ec_cost;
   }
 
+  // in classification mode, we map k-class cs to k-many k-class mc
+  //   (x, c) ->
+  //   for all i: (x, y=i, w=c_max - c_i)
+  // if we then do one-against-all on this, then
+  // the total weight for class i is:
+  //    +1: c_max - c_i
+  //    -1: sum_{j!=i} (c_max - c_j) = (K-1) c_max - c_sum + c_i
+  // so for each i we compute a weight w_i as:
+  //    w_i = c_max - c_i - (K-1) c_max + c_sum - c_i
+  //        = -2 c_i - (K-2) c_max + c_sum
+  // and if w_i > 0 when y_i = +1, else y_i = -1 and weight with |w_i|
+  // 
+  // suppose that all costs are 1 except c_1 = 0.
+  // then w_1 = -2 * 1 - (K-2) + (K-1) = -2 + 2 - 1 = -1
+  // and  w_i = -2 * 0 - (K-2) + (K-1) =  0 + 2 - 1 = +1
+  // which is exactly what we should want!
+  
   for (size_t k=start_K; k<K; k++)
   {
     example *ec = ec_seq[k];
@@ -372,16 +391,9 @@ void do_actual_learning_oaa(ldf& data, single_learner& base, size_t start_K, mul
       simple_label.label = costs[0].x;
     else     // treat like classification
     {
-      if (costs[0].x <= min_cost)
-      {
-        simple_label.label = -1.;
-        ec->weight = old_weight * (max_cost - min_cost);
-      }
-      else
-      {
-        simple_label.label = 1.;
-        ec->weight = old_weight * (costs[0].x - min_cost);
-      }
+      float w = - 2 * costs[0].x - (K-2) * max_cost + sum_costs;
+      simple_label.label = (w > 0) ? -1 : +1;
+      ec->weight = fabs(w);
     }
     ec->l.simple = simple_label;
 
@@ -398,6 +410,7 @@ void do_actual_learning_oaa(ldf& data, single_learner& base, size_t start_K, mul
     ec->l.cs = save_cs_label;
     ec->partial_prediction = costs[0].partial_prediction;
   }
+
 }
 
 
